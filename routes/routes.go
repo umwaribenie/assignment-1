@@ -30,64 +30,67 @@ func SetupRoutes() *gin.Engine {
 	// Swagger documentation
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// API version 1 routes
-	v1 := r.Group("/api/v1")
-	{
-		// Public routes (no authentication required)
-		public := v1.Group("/")
-		{
-			// Authentication routes
-			auth := public.Group("auth")
-			{
-				auth.POST("/register", handlers.Register)
-				auth.POST("/login", handlers.Login)
-				auth.POST("/password-reset/request", handlers.RequestPasswordReset)
-				auth.POST("/password-reset/confirm", handlers.ConfirmPasswordReset)
-			}
-		}
+	// File serving routes (public access)
+	r.GET("/files/:filename", handlers.ServeFile)
 
-		// Protected routes (authentication required)
-		protected := v1.Group("/")
+	// API routes matching swagger basePath: /api/v1/users
+	api := r.Group("/api/v1/users")
+	{
+		// Public authentication routes
+		api.POST("/login", handlers.Login)
+		api.POST("/register", handlers.Register)
+		api.POST("/password-reset", handlers.RequestPasswordReset)
+		api.POST("/reset-password/email", handlers.ResetPasswordEmail)
+		api.POST("/confirm-password-reset-otp", handlers.ConfirmPasswordReset)
+		api.POST("/verify-login-otp", handlers.VerifyLoginOTP)
+
+		// Protected routes (require authentication)
+		protected := api.Group("/")
 		protected.Use(middleware.AuthMiddleware())
 		{
-			// Authentication status check
-			auth := protected.Group("auth")
+			// Authentication status and logout
+			protected.GET("/check", handlers.CheckAuth)
+			protected.POST("/logout", handlers.Logout)
+			protected.POST("/update-password", handlers.UpdatePassword)
+
+			// Admin-only routes
+			adminOnly := protected.Group("/")
+			adminOnly.Use(middleware.AdminOnly())
 			{
-				auth.GET("/check", handlers.CheckAuth)
-				auth.POST("/logout", handlers.Logout)
+				// Get all users (admin only)
+				adminOnly.GET("/", handlers.GetAllUsers)
+				
+				// Admin user creation
+				adminOnly.POST("/registerusersbyadmin", handlers.RegisterUserByAdmin)
+				
+				// Admin password update
+				adminOnly.POST("/update-password/admin", handlers.UpdatePasswordByAdmin)
 			}
 
-			// User management routes
-			users := protected.Group("users")
+			// User management routes with access control
+			userRoutes := protected.Group("/")
+			userRoutes.Use(middleware.UserOrAdmin())
 			{
-				// Admin only routes
-				adminOnly := users.Group("/")
-				adminOnly.Use(middleware.AdminOnly())
-				{
-					adminOnly.GET("/", handlers.GetAllUsers)
-				}
-
-				// User or Admin routes (users can access their own data)
-				userOrAdmin := users.Group("/")
-				userOrAdmin.Use(middleware.UserOrAdmin())
-				{
-					userOrAdmin.GET("/:id", handlers.GetUserByID)
-					userOrAdmin.PUT("/:id", handlers.UpdateUser)
-				}
-
-				// Admin only user management
-				adminUserManagement := users.Group("/")
-				adminUserManagement.Use(middleware.AdminOnly())
-				{
-					adminUserManagement.DELETE("/:id", handlers.DeleteUser)
-				}
-
-				// User-specific routes (authenticated user only)
-				users.PUT("/password", handlers.UpdatePassword)
+				// Get user by ID (user can access own data, admin can access all)
+				userRoutes.GET("/:id", handlers.GetUserByID)
+				
+				// Update user (user can update own data, admin can update all)
+				userRoutes.PATCH("/:id", handlers.UpdateUser)
 			}
+
+			// Admin-only user management
+			adminUserManagement := protected.Group("/")
+			adminUserManagement.Use(middleware.AdminOnly())
+			{
+				// Delete user (admin only)
+				adminUserManagement.DELETE("/:id", handlers.DeleteUser)
+			}
+
+			// Find user by slug (protected)
+			protected.GET("/slug/:slug", handlers.GetUserBySlug)
 
 			// File upload routes
-			upload := protected.Group("upload")
+			upload := protected.Group("/upload")
 			{
 				upload.POST("/profile-picture", handlers.UploadProfilePicture)
 				upload.DELETE("/profile-picture", handlers.DeleteProfilePicture)
@@ -95,13 +98,10 @@ func SetupRoutes() *gin.Engine {
 		}
 	}
 
-	// File serving routes (public access)
-	r.GET("/files/:filename", handlers.ServeFile)
-
-	// Legacy routes for backward compatibility (without /api/v1 prefix)
+	// Legacy routes for backward compatibility (without /api/v1/users prefix)
 	legacy := r.Group("/")
 	{
-		// Public legacy routes
+		// Legacy authentication routes
 		legacyAuth := legacy.Group("auth")
 		{
 			legacyAuth.POST("/register", handlers.Register)
@@ -110,7 +110,7 @@ func SetupRoutes() *gin.Engine {
 			legacyAuth.POST("/password-reset/confirm", handlers.ConfirmPasswordReset)
 		}
 
-		// Protected legacy routes
+		// Legacy protected routes
 		legacyProtected := legacy.Group("/")
 		legacyProtected.Use(middleware.AuthMiddleware())
 		{

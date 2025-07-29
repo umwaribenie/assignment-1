@@ -1,134 +1,24 @@
 package middleware
 
 import (
+	"net/http"
+	"strings"
+	"time"
+
 	"generalusermanagement/database"
 	"generalusermanagement/models"
 	"generalusermanagement/utils"
-	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware validates JWT tokens and sets user context
-func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		
-		token, err := utils.ExtractTokenFromHeader(authHeader)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "Authorization header required",
-				Error:   err.Error(),
-			})
-			c.Abort()
-			return
-		}
-
-		// Check if token is blacklisted
-		if isTokenBlacklisted(token) {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "Token is invalid or expired",
-			})
-			c.Abort()
-			return
-		}
-
-		claims, err := utils.ValidateJWT(token)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "Invalid token",
-				Error:   err.Error(),
-			})
-			c.Abort()
-			return
-		}
-
-		// Set user information in context
-		c.Set("user_id", claims.UserID)
-		c.Set("user_email", claims.Email)
-		c.Set("user_role", claims.Role)
-		c.Set("user_username", claims.Username)
-		c.Set("client_id", claims.ClientID)
-		c.Set("token", token)
-
-		c.Next()
-	}
-}
-
-// AdminOnly middleware ensures only admin users can access the endpoint
-func AdminOnly() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userRole, exists := c.Get("user_role")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "User role not found in token",
-			})
-			c.Abort()
-			return
-		}
-
-		if userRole != models.RoleAdmin {
-			c.JSON(http.StatusForbidden, models.APIResponse{
-				Success: false,
-				Message: "Admin access required",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// UserOrAdmin middleware allows both users and admins to access the endpoint
-// But users can only access their own data
-func UserOrAdmin() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userRole, exists := c.Get("user_role")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "User role not found in token",
-			})
-			c.Abort()
-			return
-		}
-
-		// If admin, allow access to everything
-		if userRole == models.RoleAdmin {
-			c.Next()
-			return
-		}
-
-		// If user, check if they're accessing their own data
-		userID, _ := c.Get("user_id")
-		requestedUserID := c.Param("id")
-		
-		if requestedUserID != "" && userID != requestedUserID {
-			c.JSON(http.StatusForbidden, models.APIResponse{
-				Success: false,
-				Message: "Access denied: You can only access your own data",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// CORSMiddleware handles Cross-Origin Resource Sharing
+// CORSMiddleware handles CORS
 func CORSMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
+	return gin.HandlerFunc(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Header("Access-Control-Allow-Methods", "POST, HEAD, PATCH, OPTIONS, GET, PUT, DELETE")
+		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, PATCH, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -136,25 +26,158 @@ func CORSMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
-	}
+	})
 }
 
-// isTokenBlacklisted checks if a token is in the blacklist
-func isTokenBlacklisted(token string) bool {
-	query := `SELECT COUNT(*) FROM token_blacklist WHERE token = $1 AND expires_at > NOW()`
-	var count int
-	
-	err := database.DB.QueryRow(query, token).Scan(&count)
-	if err != nil {
-		return false
-	}
-	
-	return count > 0
+// AuthMiddleware validates JWT token
+func AuthMiddleware() gin.HandlerFunc {
+	return gin.HandlerFunc(func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Authorization header required",
+			})
+			c.Abort()
+			return
+		}
+
+		// Extract token from "Bearer <token>"
+		tokenParts := strings.Split(authHeader, " ")
+		if len(tokenParts) != 2 || strings.ToLower(tokenParts[0]) != "bearer" {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Invalid authorization header format",
+			})
+			c.Abort()
+			return
+		}
+
+		tokenString := tokenParts[1]
+
+		// Check if token is blacklisted
+		var exists bool
+		err := database.DB.QueryRow(`
+			SELECT EXISTS(SELECT 1 FROM token_blacklist WHERE token = $1 AND expires_at > NOW())
+		`, tokenString).Scan(&exists)
+		
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Database error",
+			})
+			c.Abort()
+			return
+		}
+
+		if exists {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Token has been revoked",
+			})
+			c.Abort()
+			return
+		}
+
+		// Validate JWT token
+		claims, err := utils.ValidateJWT(tokenString)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Invalid token",
+			})
+			c.Abort()
+			return
+		}
+
+		// Extract user information from claims
+		userID, ok := claims["user_id"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Invalid token claims",
+			})
+			c.Abort()
+			return
+		}
+
+		role, ok := claims["role"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Invalid token claims",
+			})
+			c.Abort()
+			return
+		}
+
+		// Verify user still exists and is active
+		var userExists bool
+		var userStatus string
+		var isActive bool
+		err = database.DB.QueryRow(`
+			SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL), 
+			       COALESCE(status, ''), COALESCE(is_active, false)
+			FROM users WHERE id = $1 AND deleted_at IS NULL
+		`, userID).Scan(&userExists, &userStatus, &isActive)
+
+		if err != nil || !userExists || userStatus != string(models.StatusActive) || !isActive {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "User account is not active",
+			})
+			c.Abort()
+			return
+		}
+
+		// Set user information in context
+		c.Set("user_id", userID)
+		c.Set("user_role", role)
+		c.Set("token", tokenString)
+
+		c.Next()
+	})
 }
 
-// BlacklistToken adds a token to the blacklist
+// AdminOnly middleware ensures only admin users can access the endpoint
+func AdminOnly() gin.HandlerFunc {
+	return gin.HandlerFunc(func(c *gin.Context) {
+		userRole := c.GetString("user_role")
+		if userRole != string(models.RoleAdmin) {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error: "Access denied. Admin role required",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
+}
+
+// UserOrAdmin middleware allows both users and admins to access the endpoint
+// Users can only access their own data, admins can access all data
+func UserOrAdmin() gin.HandlerFunc {
+	return gin.HandlerFunc(func(c *gin.Context) {
+		userRole := c.GetString("user_role")
+		currentUserID := c.GetString("user_id")
+		targetUserID := c.Param("id")
+
+		// Admin can access any user's data
+		if userRole == string(models.RoleAdmin) {
+			c.Next()
+			return
+		}
+
+		// Regular users can only access their own data
+		if userRole == string(models.RoleUser) && currentUserID == targetUserID {
+			c.Next()
+			return
+		}
+
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error: "Access denied",
+		})
+		c.Abort()
+	})
+}
+
+// Legacy function for backward compatibility
 func BlacklistToken(token string, expiresAt time.Time) error {
-	query := `INSERT INTO token_blacklist (token, expires_at) VALUES ($1, $2)`
-	_, err := database.DB.Exec(query, token, expiresAt)
+	_, err := database.DB.Exec(`
+		INSERT INTO token_blacklist (token, expires_at) 
+		VALUES ($1, $2)
+	`, token, expiresAt)
 	return err
 }

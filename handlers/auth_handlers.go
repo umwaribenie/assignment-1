@@ -2,512 +2,609 @@ package handlers
 
 import (
 	"database/sql"
-	"generalusermanagement/database"
-	"generalusermanagement/middleware"
-	"generalusermanagement/models"
-	"generalusermanagement/utils"
 	"net/http"
 	"time"
 
+	"generalusermanagement/database"
+	"generalusermanagement/models"
+	"generalusermanagement/utils"
+
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
-// Login godoc
-// @Summary User login
-// @Description Authenticate user with email and password
-// @Tags Auth
+// @Summary Login a user
+// @Description Login a user
+// @Tags auth
 // @Accept json
 // @Produce json
-// @Param credentials body models.LoginRequest true "Login credentials"
-// @Success 200 {object} models.APIResponse{data=models.LoginResponse}
-// @Failure 400 {object} models.APIResponse
-// @Failure 401 {object} models.APIResponse
-// @Router /auth/login [post]
+// @Param loginData body models.LoginData true "Login Data"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 401 {object} models.ErrorResponse
+// @Router /login [post]
 func Login(c *gin.Context) {
-	var req models.LoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Success: false,
-			Message: "Invalid request data",
-			Error:   err.Error(),
+	var loginData models.LoginData
+	if err := c.ShouldBindJSON(&loginData); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: err.Error(),
 		})
 		return
 	}
 
-	// Find user by email
+	// Query user by username or email
 	var user models.User
-	query := `SELECT id, client_id, email, first_name, last_name, national_id, passport_number, 
-	          password, phone, profile_picture, username, role, status, created_at, updated_at, deleted_at 
-	          FROM users WHERE email = $1 AND deleted_at IS NULL`
-	
-	row := database.DB.QueryRow(query, req.Email)
-	err := row.Scan(&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
-		&user.NationalID, &user.PassportNumber, &user.Password, &user.Phone, &user.ProfilePicture,
-		&user.Username, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+	query := `
+		SELECT id, client_id, email, first_name, last_name, national_id, passport_number, 
+			   password, phone, profile_picture, username, role, status, slug, notes,
+			   institution_id, subscription_status, has_active_subscription, is_active,
+			   otp_required, referral_code, created_by, created_at, updated_at, deleted_at
+		FROM users 
+		WHERE (username = $1 OR email = $1) AND deleted_at IS NULL
+	`
+
+	err := database.DB.QueryRow(query, loginData.Username).Scan(
+		&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
+		&user.NationalID, &user.PassportNumber, &user.Password, &user.Phone,
+		&user.ProfilePicture, &user.Username, &user.Role, &user.Status, &user.Slug,
+		&user.Notes, &user.InstitutionID, &user.SubscriptionStatus,
+		&user.HasActiveSubscription, &user.IsActive, &user.OTPRequired,
+		&user.ReferralCode, &user.CreatedBy, &user.CreatedAt, &user.UpdatedAt,
+		&user.DeletedAt,
+	)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "Invalid email or password",
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error: "Invalid credentials",
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Database error",
-			Error:   err.Error(),
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Database error",
+		})
+		return
+	}
+
+	// Check password
+	if err := utils.CheckPassword(loginData.Password, user.Password); err != nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "Invalid credentials",
 		})
 		return
 	}
 
 	// Check if user is active
-	if user.Status != models.StatusActive {
-		c.JSON(http.StatusUnauthorized, models.APIResponse{
-			Success: false,
-			Message: "Account is not active",
+	if user.Status != models.StatusActive || !user.IsActive {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "Account is not active",
 		})
 		return
 	}
 
-	// Verify password
-	if !utils.CheckPasswordHash(req.Password, user.Password) {
-		c.JSON(http.StatusUnauthorized, models.APIResponse{
-			Success: false,
-			Message: "Invalid email or password",
+	// Check if OTP is required
+	if user.OTPRequired {
+		// Generate and store OTP
+		otp := utils.GenerateOTP()
+		expiresAt := time.Now().Add(5 * time.Minute)
+
+		// Store OTP in database
+		_, err = database.DB.Exec(`
+			INSERT INTO login_otps (user_id, otp, expires_at) 
+			VALUES ($1, $2, $3)
+		`, user.ID, otp, expiresAt)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Failed to generate OTP",
+			})
+			return
+		}
+
+		// In a real application, you would send the OTP via SMS/Email
+		// For demo purposes, we'll return a success message
+		c.JSON(http.StatusOK, models.SuccessResponse{
+			Message: "OTP sent successfully. Please verify to complete login.",
 		})
 		return
 	}
 
 	// Generate JWT token
-	token, expiresAt, err := utils.GenerateJWT(user)
+	token, err := utils.GenerateJWT(user.ID.String(), string(user.Role))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to generate token",
-			Error:   err.Error(),
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to generate token",
 		})
 		return
 	}
 
-	// Convert user to response format
+	// Create user response
 	userResponse := models.UserResponse{
-		ID:             user.ID,
-		ClientID:       user.ClientID,
-		Email:          user.Email,
-		FirstName:      user.FirstName,
-		LastName:       user.LastName,
-		NationalID:     user.NationalID,
-		PassportNumber: user.PassportNumber,
-		Phone:          user.Phone,
-		ProfilePicture: user.ProfilePicture,
-		Username:       user.Username,
-		Role:           user.Role,
-		Status:         user.Status,
-		CreatedAt:      user.CreatedAt,
-		UpdatedAt:      user.UpdatedAt,
+		ID:                    user.ID,
+		ClientID:              user.ClientID,
+		Email:                 user.Email,
+		FirstName:             user.FirstName,
+		LastName:              user.LastName,
+		NationalID:            user.NationalID,
+		PassportNumber:        user.PassportNumber,
+		Phone:                 user.Phone,
+		ProfilePicture:        user.ProfilePicture,
+		Username:              user.Username,
+		Role:                  user.Role,
+		Status:                user.Status,
+		Slug:                  user.Slug,
+		Notes:                 user.Notes,
+		InstitutionID:         user.InstitutionID,
+		SubscriptionStatus:    user.SubscriptionStatus,
+		HasActiveSubscription: user.HasActiveSubscription,
+		IsActive:             user.IsActive,
+		OTPRequired:          user.OTPRequired,
+		ReferralCode:         user.ReferralCode,
+		CreatedBy:            user.CreatedBy,
+		CreatedAt:            user.CreatedAt,
+		UpdatedAt:            user.UpdatedAt,
 	}
 
-	loginResponse := models.LoginResponse{
-		Token:     token,
-		User:      userResponse,
-		ExpiresAt: expiresAt,
-	}
-
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "Login successful",
-		Data:    loginResponse,
+	c.JSON(http.StatusOK, models.LoginSuccessResponse{
+		AccessToken: token,
+		User:        userResponse,
 	})
 }
 
-// Register godoc
-// @Summary User registration
-// @Description Register a new user
-// @Tags Auth
+// @Summary Verify login OTP
+// @Description Verifies user login OTP and returns JWT
+// @Tags auth
 // @Accept json
 // @Produce json
-// @Param user body models.CreateUserRequest true "User data"
-// @Success 201 {object} models.APIResponse{data=models.UserResponse}
-// @Failure 400 {object} models.APIResponse
-// @Failure 409 {object} models.APIResponse
-// @Router /auth/register [post]
-func Register(c *gin.Context) {
-	var req models.CreateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Success: false,
-			Message: "Invalid request data",
-			Error:   err.Error(),
+// @Param otpData body models.ConfirmLoginOTPRequest true "OTP verification"
+// @Success 200 {object} models.LoginSuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Router /verify-login-otp [post]
+func VerifyLoginOTP(c *gin.Context) {
+	var otpRequest models.ConfirmLoginOTPRequest
+	if err := c.ShouldBindJSON(&otpRequest); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: err.Error(),
 		})
 		return
 	}
 
-	// Check if user already exists
-	var exists bool
-	checkQuery := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 OR username = $2)`
-	err := database.DB.QueryRow(checkQuery, req.Email, req.Username).Scan(&exists)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Database error",
-			Error:   err.Error(),
-		})
-		return
-	}
+	// Find valid OTP
+	var userID uuid.UUID
+	var expiresAt time.Time
+	query := `
+		SELECT user_id, expires_at 
+		FROM login_otps 
+		WHERE otp = $1 AND used = false AND expires_at > NOW()
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
 
-	if exists {
-		c.JSON(http.StatusConflict, models.APIResponse{
-			Success: false,
-			Message: "User with this email or username already exists",
-		})
-		return
-	}
-
-	// Hash password
-	hashedPassword, err := utils.HashPassword(req.Password)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to hash password",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Set default values
-	if req.Role == "" {
-		req.Role = models.RoleUser
-	}
-	if req.Status == "" {
-		req.Status = models.StatusActive
-	}
-
-	// Generate client ID
-	clientID := utils.GenerateClientID()
-
-	// Insert user
-	var user models.User
-	insertQuery := `INSERT INTO users (client_id, email, first_name, last_name, national_id, passport_number, 
-	                password, phone, username, role, status) 
-	                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
-	                RETURNING id, client_id, email, first_name, last_name, national_id, passport_number, 
-	                phone, profile_picture, username, role, status, created_at, updated_at`
-
-	err = database.DB.QueryRow(insertQuery, clientID, req.Email, req.FirstName, req.LastName,
-		req.NationalID, req.PassportNumber, hashedPassword, req.Phone, req.Username, req.Role, req.Status).
-		Scan(&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
-			&user.NationalID, &user.PassportNumber, &user.Phone, &user.ProfilePicture,
-			&user.Username, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to create user",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Convert to response format
-	userResponse := models.UserResponse{
-		ID:             user.ID,
-		ClientID:       user.ClientID,
-		Email:          user.Email,
-		FirstName:      user.FirstName,
-		LastName:       user.LastName,
-		NationalID:     user.NationalID,
-		PassportNumber: user.PassportNumber,
-		Phone:          user.Phone,
-		ProfilePicture: user.ProfilePicture,
-		Username:       user.Username,
-		Role:           user.Role,
-		Status:         user.Status,
-		CreatedAt:      user.CreatedAt,
-		UpdatedAt:      user.UpdatedAt,
-	}
-
-	c.JSON(http.StatusCreated, models.APIResponse{
-		Success: true,
-		Message: "User registered successfully",
-		Data:    userResponse,
-	})
-}
-
-// Logout godoc
-// @Summary User logout
-// @Description Logout user and blacklist token
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Success 200 {object} models.APIResponse
-// @Failure 401 {object} models.APIResponse
-// @Router /auth/logout [post]
-func Logout(c *gin.Context) {
-	token, _ := c.Get("token")
-	tokenString := token.(string)
-
-	// Get token expiration from JWT claims
-	claims, err := utils.ValidateJWT(tokenString)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.APIResponse{
-			Success: false,
-			Message: "Invalid token",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Blacklist the token
-	err = middleware.BlacklistToken(tokenString, claims.ExpiresAt.Time)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to logout",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "Logout successful",
-	})
-}
-
-// RequestPasswordReset godoc
-// @Summary Request password reset
-// @Description Request a password reset OTP via email
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Param request body models.PasswordResetRequest true "Password reset request"
-// @Success 200 {object} models.APIResponse
-// @Failure 400 {object} models.APIResponse
-// @Failure 404 {object} models.APIResponse
-// @Router /auth/password-reset/request [post]
-func RequestPasswordReset(c *gin.Context) {
-	var req models.PasswordResetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Success: false,
-			Message: "Invalid request data",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Check if user exists
-	var userExists bool
-	checkQuery := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL)`
-	err := database.DB.QueryRow(checkQuery, req.Email).Scan(&userExists)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Database error",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	if !userExists {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Success: false,
-			Message: "User not found",
-		})
-		return
-	}
-
-	// Generate OTP
-	otp, err := utils.GenerateOTP()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to generate OTP",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Store OTP in database (expires in 15 minutes)
-	expiresAt := time.Now().Add(15 * time.Minute)
-	insertQuery := `INSERT INTO password_resets (email, otp, expires_at) VALUES ($1, $2, $3)`
-	_, err = database.DB.Exec(insertQuery, req.Email, otp, expiresAt)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to save OTP",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// TODO: Send OTP via email (implement email service)
-	// For now, we'll just return success
-	// In production, you would integrate with an email service like SendGrid, AWS SES, etc.
-
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "Password reset OTP sent to your email",
-		Data: map[string]interface{}{
-			"otp": otp, // Remove this in production
-		},
-	})
-}
-
-// ConfirmPasswordReset godoc
-// @Summary Confirm password reset
-// @Description Reset password using OTP
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Param request body models.PasswordResetConfirmRequest true "Password reset confirmation"
-// @Success 200 {object} models.APIResponse
-// @Failure 400 {object} models.APIResponse
-// @Failure 404 {object} models.APIResponse
-// @Router /auth/password-reset/confirm [post]
-func ConfirmPasswordReset(c *gin.Context) {
-	var req models.PasswordResetConfirmRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Success: false,
-			Message: "Invalid request data",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Verify OTP
-	var resetID int
-	checkQuery := `SELECT id FROM password_resets 
-	               WHERE email = $1 AND otp = $2 AND expires_at > NOW() AND used = FALSE`
-	err := database.DB.QueryRow(checkQuery, req.Email, req.OTP).Scan(&resetID)
+	err := database.DB.QueryRow(query, otpRequest.OTP).Scan(&userID, &expiresAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusBadRequest, models.APIResponse{
-				Success: false,
-				Message: "Invalid or expired OTP",
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error: "Invalid or expired OTP",
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Database error",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Hash new password
-	hashedPassword, err := utils.HashPassword(req.NewPassword)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to hash password",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Update user password
-	updateQuery := `UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE email = $2`
-	_, err = database.DB.Exec(updateQuery, hashedPassword, req.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to update password",
-			Error:   err.Error(),
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Database error",
 		})
 		return
 	}
 
 	// Mark OTP as used
-	markUsedQuery := `UPDATE password_resets SET used = TRUE WHERE id = $1`
-	_, err = database.DB.Exec(markUsedQuery, resetID)
+	_, err = database.DB.Exec(`
+		UPDATE login_otps 
+		SET used = true 
+		WHERE otp = $1 AND user_id = $2
+	`, otpRequest.OTP, userID)
+
 	if err != nil {
-		// Log error but don't fail the request
-		// The password was already updated successfully
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to update OTP status",
+		})
+		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
+	// Get user details
+	var user models.User
+	userQuery := `
+		SELECT id, client_id, email, first_name, last_name, national_id, passport_number, 
+			   password, phone, profile_picture, username, role, status, slug, notes,
+			   institution_id, subscription_status, has_active_subscription, is_active,
+			   otp_required, referral_code, created_by, created_at, updated_at, deleted_at
+		FROM users 
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+
+	err = database.DB.QueryRow(userQuery, userID).Scan(
+		&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
+		&user.NationalID, &user.PassportNumber, &user.Password, &user.Phone,
+		&user.ProfilePicture, &user.Username, &user.Role, &user.Status, &user.Slug,
+		&user.Notes, &user.InstitutionID, &user.SubscriptionStatus,
+		&user.HasActiveSubscription, &user.IsActive, &user.OTPRequired,
+		&user.ReferralCode, &user.CreatedBy, &user.CreatedAt, &user.UpdatedAt,
+		&user.DeletedAt,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to get user details",
+		})
+		return
+	}
+
+	// Generate JWT token
+	token, err := utils.GenerateJWT(user.ID.String(), string(user.Role))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to generate token",
+		})
+		return
+	}
+
+	// Create user response
+	userResponse := models.UserResponse{
+		ID:                    user.ID,
+		ClientID:              user.ClientID,
+		Email:                 user.Email,
+		FirstName:             user.FirstName,
+		LastName:              user.LastName,
+		NationalID:            user.NationalID,
+		PassportNumber:        user.PassportNumber,
+		Phone:                 user.Phone,
+		ProfilePicture:        user.ProfilePicture,
+		Username:              user.Username,
+		Role:                  user.Role,
+		Status:                user.Status,
+		Slug:                  user.Slug,
+		Notes:                 user.Notes,
+		InstitutionID:         user.InstitutionID,
+		SubscriptionStatus:    user.SubscriptionStatus,
+		HasActiveSubscription: user.HasActiveSubscription,
+		IsActive:             user.IsActive,
+		OTPRequired:          user.OTPRequired,
+		ReferralCode:         user.ReferralCode,
+		CreatedBy:            user.CreatedBy,
+		CreatedAt:            user.CreatedAt,
+		UpdatedAt:            user.UpdatedAt,
+	}
+
+	c.JSON(http.StatusOK, models.LoginSuccessResponse{
+		AccessToken: token,
+		User:        userResponse,
+	})
+}
+
+// @Summary Request password reset
+// @Description Request password reset
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param passwordReset body models.PasswordResetRequest true "Password Reset Request"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Router /password-reset [post]
+func RequestPasswordReset(c *gin.Context) {
+	var request models.PasswordResetRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: err.Error(),
+		})
+		return
+	}
+
+	// Check if user exists
+	var userEmail string
+	query := `
+		SELECT email FROM users 
+		WHERE (username = $1 OR email = $1) AND client_id = $2 AND deleted_at IS NULL
+	`
+	err := database.DB.QueryRow(query, request.Username, request.ClientID).Scan(&userEmail)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Don't reveal if user exists or not
+			c.JSON(http.StatusOK, models.SuccessResponse{
+				Message: "If the user exists, a password reset OTP has been sent",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Database error",
+		})
+		return
+	}
+
+	// Generate OTP
+	otp := utils.GenerateOTP()
+	expiresAt := time.Now().Add(15 * time.Minute)
+
+	// Store OTP
+	_, err = database.DB.Exec(`
+		INSERT INTO password_resets (email, otp, expires_at) 
+		VALUES ($1, $2, $3)
+	`, userEmail, otp, expiresAt)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to generate password reset OTP",
+		})
+		return
+	}
+
+	// In a real application, send OTP via email/SMS
+	c.JSON(http.StatusOK, models.SuccessResponse{
+		Message: "Password reset OTP sent successfully",
+	})
+}
+
+// @Summary Reset password via email
+// @Description Reset password via email
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param resetPassword body models.PasswordResetRequest true "Reset Password Request"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Router /reset-password/email [post]
+func ResetPasswordEmail(c *gin.Context) {
+	// This is the same as RequestPasswordReset for now
+	RequestPasswordReset(c)
+}
+
+// @Summary Confirm password reset OTP
+// @Description Confirm password reset OTP
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param confirmOTP body models.ConfirmOTPRequest true "Confirm OTP Request"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Router /confirm-password-reset-otp [post]
+func ConfirmPasswordReset(c *gin.Context) {
+	var request models.ConfirmOTPRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: err.Error(),
+		})
+		return
+	}
+
+	// Find valid OTP
+	var email string
+	var expiresAt time.Time
+	query := `
+		SELECT email, expires_at 
+		FROM password_resets 
+		WHERE otp = $1 AND used = false AND expires_at > NOW()
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+
+	err := database.DB.QueryRow(query, request.OTP).Scan(&email, &expiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error: "Invalid or expired OTP",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Database error",
+		})
+		return
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(request.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to hash password",
+		})
+		return
+	}
+
+	// Update user password
+	_, err = database.DB.Exec(`
+		UPDATE users 
+		SET password = $1, updated_at = NOW() 
+		WHERE email = $2
+	`, hashedPassword, email)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to update password",
+		})
+		return
+	}
+
+	// Mark OTP as used
+	_, err = database.DB.Exec(`
+		UPDATE password_resets 
+		SET used = true 
+		WHERE otp = $1 AND email = $2
+	`, request.OTP, email)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to update OTP status",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse{
 		Message: "Password reset successfully",
 	})
 }
 
-// CheckAuth godoc
-// @Summary Check authentication status
-// @Description Check if the current token is valid and return user info
-// @Tags Auth
+// @Summary Update password
+// @Description Update password
+// @Tags auth
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} models.APIResponse{data=models.UserResponse}
-// @Failure 401 {object} models.APIResponse
-// @Router /auth/check [get]
+// @Param updatePassword body models.UpdatePasswordRequest true "Update Password Request"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Router /update-password [post]
+func UpdatePassword(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "Unauthorized",
+		})
+		return
+	}
+
+	var request models.UpdatePasswordRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: err.Error(),
+		})
+		return
+	}
+
+	// Get current password
+	var currentPassword string
+	err := database.DB.QueryRow(`
+		SELECT password FROM users WHERE id = $1 AND deleted_at IS NULL
+	`, userID).Scan(&currentPassword)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to get user information",
+		})
+		return
+	}
+
+	// Verify old password
+	if err := utils.CheckPassword(request.OldPassword, currentPassword); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Current password is incorrect",
+		})
+		return
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(request.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to hash password",
+		})
+		return
+	}
+
+	// Update password
+	_, err = database.DB.Exec(`
+		UPDATE users 
+		SET password = $1, updated_at = NOW() 
+		WHERE id = $2
+	`, hashedPassword, userID)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to update password",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse{
+		Message: "Password updated successfully",
+	})
+}
+
+// @Summary Check if the user is authenticated
+// @Description Check if the user is authenticated
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} models.SuccessResponse
+// @Router /check [get]
 func CheckAuth(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	
-	// Get user from database
-	var user models.User
-	query := `SELECT id, client_id, email, first_name, last_name, national_id, passport_number, 
-	          phone, profile_picture, username, role, status, created_at, updated_at 
-	          FROM users WHERE id = $1 AND deleted_at IS NULL`
-	
-	userUUID, err := uuid.Parse(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Success: false,
-			Message: "Invalid user ID",
-			Error:   err.Error(),
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "Unauthorized",
 		})
 		return
 	}
 
-	row := database.DB.QueryRow(query, userUUID)
-	err = row.Scan(&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
-		&user.NationalID, &user.PassportNumber, &user.Phone, &user.ProfilePicture,
-		&user.Username, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	c.JSON(http.StatusOK, models.SuccessResponse{
+		Message: "Authenticated",
+	})
+}
 
-	if err != nil {
-		if err == sql.ErrNoRows {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Message: "User not found",
-			})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Database error",
-			Error:   err.Error(),
+// @Summary User logout
+// @Description User logout (requires authentication)
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} models.SuccessResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /logout [post]
+func Logout(c *gin.Context) {
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "No token provided",
 		})
 		return
 	}
 
-	// Convert to response format
-	userResponse := models.UserResponse{
-		ID:             user.ID,
-		ClientID:       user.ClientID,
-		Email:          user.Email,
-		FirstName:      user.FirstName,
-		LastName:       user.LastName,
-		NationalID:     user.NationalID,
-		PassportNumber: user.PassportNumber,
-		Phone:          user.Phone,
-		ProfilePicture: user.ProfilePicture,
-		Username:       user.Username,
-		Role:           user.Role,
-		Status:         user.Status,
-		CreatedAt:      user.CreatedAt,
-		UpdatedAt:      user.UpdatedAt,
+	// Remove "Bearer " prefix
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "Authentication valid",
-		Data:    userResponse,
+	// Parse token to get expiration time
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(utils.GetJWTSecret()), nil
+	})
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Invalid token",
+		})
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Invalid token claims",
+		})
+		return
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Invalid token expiration",
+		})
+		return
+	}
+
+	expirationTime := time.Unix(int64(exp), 0)
+
+	// Add token to blacklist
+	_, err = database.DB.Exec(`
+		INSERT INTO token_blacklist (token, expires_at) 
+		VALUES ($1, $2)
+	`, tokenString, expirationTime)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to logout",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse{
+		Message: "Logged out successfully",
 	})
 }

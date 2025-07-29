@@ -11,20 +11,20 @@ import (
 	_ "generalusermanagement/docs"
 )
 
-// @title General User Management API
-// @version 1.0
-// @description A comprehensive user management system with authentication, authorization, and file upload capabilities.
+// @title User mngt
+// @version 1.2
+// @description General user management
 // @termsOfService http://swagger.io/terms/
 
 // @contact.name API Support
-// @contact.url http://www.swagger.io/support
-// @contact.email support@swagger.io
+// @contact.url 
+// @contact.email umwaribenie5@gmail.com
 
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 
-// @host localhost:8082
-// @BasePath /
+// @host 
+// @BasePath /api/v1/users
 
 // @securityDefinitions.apikey BearerAuth
 // @in header
