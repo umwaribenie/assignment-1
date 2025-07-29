@@ -1,0 +1,800 @@
+basePath: /api/v1
+definitions:
+  models.APIResponse:
+    properties:
+      data: {}
+      error: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+  models.CreateUserByAdminRequest:
+    properties:
+      commission_percentage:
+        maximum: 100
+        minimum: 1
+        type: integer
+      email:
+        type: string
+      first_name:
+        type: string
+      institution_id:
+        type: string
+      last_name:
+        type: string
+      national_id:
+        type: string
+      passport_number:
+        type: string
+      password:
+        maxLength: 16
+        minLength: 5
+        type: string
+      phone:
+        type: string
+      profile_picture:
+        type: string
+      role:
+        allOf:
+        - $ref: '#/definitions/models.UserRole'
+        enum:
+        - member
+        - admin
+        - trainer
+        - instructor
+        - frontdesk
+        - finance
+        - seler
+      seler_type:
+        allOf:
+        - $ref: '#/definitions/models.SelerType'
+        enum:
+        - seler
+        - promoter
+      specialization:
+        type: string
+      username:
+        type: string
+    required:
+    - email
+    - first_name
+    - last_name
+    - password
+    - role
+    type: object
+  models.CreateUserRequest:
+    properties:
+      client_id:
+        type: string
+      email:
+        type: string
+      first_name:
+        type: string
+      last_name:
+        type: string
+      national_id:
+        type: string
+      passport_number:
+        type: string
+      password:
+        maxLength: 16
+        minLength: 5
+        type: string
+      phone:
+        type: string
+      role:
+        $ref: '#/definitions/models.UserRole'
+      status:
+        $ref: '#/definitions/models.UserStatus'
+      username:
+        type: string
+    required:
+    - client_id
+    - email
+    - first_name
+    - last_name
+    - password
+    - phone
+    type: object
+  models.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  models.LoginRequest:
+    properties:
+      client_id:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  models.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      expires_at:
+        type: string
+      user:
+        $ref: '#/definitions/models.UserResponse'
+    type: object
+  models.PaginatedResponse:
+    properties:
+      current_page:
+        type: integer
+      last_page:
+        type: integer
+      list: {}
+      next_page:
+        type: integer
+      previous_page:
+        type: integer
+      status:
+        type: string
+      total:
+        type: integer
+    type: object
+  models.PasswordResetConfirmRequest:
+    properties:
+      otp:
+        type: string
+      password:
+        minLength: 6
+        type: string
+    required:
+    - otp
+    - password
+    type: object
+  models.PasswordResetRequest:
+    properties:
+      client_id:
+        type: string
+      username:
+        type: string
+    required:
+    - client_id
+    - username
+    type: object
+  models.PasswordUpdateRequest:
+    properties:
+      new_password:
+        minLength: 6
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
+  models.SelerType:
+    enum:
+    - seler
+    - promoter
+    type: string
+    x-enum-varnames:
+    - SelerTypeSeler
+    - SelerTypePromoter
+  models.SubscriptionStatus:
+    enum:
+    - active
+    - inactive
+    - expired
+    - onhold
+    - paused
+    - canceled
+    type: string
+    x-enum-varnames:
+    - SubscriptionActive
+    - SubscriptionInactive
+    - SubscriptionExpired
+    - SubscriptionOnHold
+    - SubscriptionPaused
+    - SubscriptionCanceled
+  models.SuccessResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  models.UpdateUserRequest:
+    properties:
+      email:
+        type: string
+      first_name:
+        type: string
+      last_name:
+        type: string
+      national_id:
+        type: string
+      notes:
+        type: string
+      passport_number:
+        type: string
+      password:
+        maxLength: 16
+        minLength: 5
+        type: string
+      phone:
+        type: string
+      profile_picture:
+        type: string
+      role:
+        $ref: '#/definitions/models.UserRole'
+      specialization:
+        type: string
+      status:
+        $ref: '#/definitions/models.UserStatus'
+      username:
+        type: string
+    type: object
+  models.UserResponse:
+    properties:
+      client_id:
+        type: string
+      commission_percentage:
+        type: integer
+      created_at:
+        type: string
+      created_by:
+        type: string
+      email:
+        type: string
+      first_name:
+        type: string
+      has_active_subscription:
+        type: boolean
+      id:
+        type: string
+      institution_id:
+        type: string
+      is_active:
+        type: boolean
+      last_name:
+        type: string
+      national_id:
+        type: string
+      notes:
+        type: string
+      otp_required:
+        type: boolean
+      passport_number:
+        type: string
+      phone:
+        type: string
+      profile_picture:
+        type: string
+      referral_code:
+        type: string
+      role:
+        $ref: '#/definitions/models.UserRole'
+      seler_type:
+        $ref: '#/definitions/models.SelerType'
+      slug:
+        type: string
+      specialization:
+        type: string
+      status:
+        $ref: '#/definitions/models.UserStatus'
+      subscription_status:
+        $ref: '#/definitions/models.SubscriptionStatus'
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+  models.UserRole:
+    enum:
+    - user
+    - admin
+    - super_admin
+    - trainer
+    - instructor
+    - frontdesk
+    - finance
+    - seler
+    - member
+    type: string
+    x-enum-varnames:
+    - RoleUser
+    - RoleAdmin
+    - RoleSuperAdmin
+    - RoleTrainer
+    - RoleInstructor
+    - RoleFrontdesk
+    - RoleFinance
+    - RoleSeler
+    - RoleMember
+  models.UserStatus:
+    enum:
+    - active
+    - inactive
+    - suspended
+    - deleted
+    type: string
+    x-enum-varnames:
+    - StatusActive
+    - StatusInactive
+    - StatusSuspended
+    - StatusDeleted
+host: localhost:8082
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: A comprehensive user management system with authentication and authorization
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: User Management API
+  version: "1.0"
+paths:
+  /files/{filename}:
+    get:
+      description: Serve static files (like profile pictures)
+      parameters:
+      - description: Filename
+        in: path
+        name: filename
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+      summary: Serve uploaded file
+      tags:
+      - Upload
+  /upload/profile-picture:
+    delete:
+      consumes:
+      - application/json
+      description: Delete the profile picture of the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete profile picture
+      tags:
+      - Upload
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a profile picture for the authenticated user
+      parameters:
+      - description: Profile picture file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/models.APIResponse'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload profile picture
+      tags:
+      - Upload
+  /users:
+    get:
+      description: Get paginated list of users with optional filtering
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: pageNumber
+        type: integer
+      - default: 10
+        description: Page size
+        in: query
+        name: pageSize
+        type: integer
+      - description: Filter by role
+        in: query
+        name: role
+        type: string
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      - description: Search in email, username, first_name, last_name
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.PaginatedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get All Users
+      tags:
+      - Users
+  /users/{id}:
+    delete:
+      description: Soft delete a user
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete User
+      tags:
+      - Users
+    get:
+      description: Get a single user by their ID
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get User by ID
+      tags:
+      - Users
+    patch:
+      consumes:
+      - application/json
+      description: Update user information
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: User update data
+        in: body
+        name: updateUserRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update User
+      tags:
+      - Users
+  /users/check:
+    get:
+      description: Verify if user is authenticated
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Check Authentication
+      tags:
+      - Authentication
+  /users/confirm-password-reset-otp:
+    post:
+      consumes:
+      - application/json
+      description: Confirm password reset with OTP
+      parameters:
+      - description: Password reset confirmation
+        in: body
+        name: passwordResetConfirmRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.PasswordResetConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Confirm Password Reset
+      tags:
+      - Authentication
+  /users/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user with username/email and password
+      parameters:
+      - description: Login credentials
+        in: body
+        name: loginRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: User Login
+      tags:
+      - Authentication
+  /users/logout:
+    post:
+      description: Logout user and blacklist token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: User Logout
+      tags:
+      - Authentication
+  /users/password-reset:
+    post:
+      consumes:
+      - application/json
+      description: Request password reset OTP
+      parameters:
+      - description: Password reset request
+        in: body
+        name: passwordResetRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.PasswordResetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Request Password Reset
+      tags:
+      - Authentication
+  /users/register:
+    post:
+      consumes:
+      - application/json
+      description: Register a new user
+      parameters:
+      - description: User registration data
+        in: body
+        name: createUserRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+      summary: Register User
+      tags:
+      - Users
+  /users/registerusersbyadmin:
+    post:
+      consumes:
+      - application/json
+      description: Create a new user by admin with extended fields
+      parameters:
+      - description: Admin user creation data
+        in: body
+        name: createUserByAdminRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateUserByAdminRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create User by Admin
+      tags:
+      - Users
+  /users/slug/{slug}:
+    get:
+      description: Get a single user by their slug
+      parameters:
+      - description: User Slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get User by Slug
+      tags:
+      - Users
+  /users/update-password:
+    post:
+      consumes:
+      - application/json
+      description: Update user's own password
+      parameters:
+      - description: Password update data
+        in: body
+        name: passwordUpdateRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.PasswordUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update Password
+      tags:
+      - Users
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
