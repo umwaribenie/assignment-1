@@ -68,8 +68,6 @@ type User struct {
 	Status                 UserStatus           `json:"status" db:"status"`
 	SubscriptionStatus     *SubscriptionStatus  `json:"subscription_status,omitempty" db:"subscription_status"`
 	InstitutionID          *string              `json:"institution_id,omitempty" db:"institution_id"`
-	EmployeeID             *string              `json:"employee_id,omitempty" db:"employee_id"`
-	DependentID            *string              `json:"dependent_id,omitempty" db:"dependent_id"`
 	CommissionPercentage   *int                 `json:"commission_percentage,omitempty" db:"commission_percentage"`
 	SelerType              *SelerType           `json:"seler_type,omitempty" db:"seler_type"`
 	Specialization         *string              `json:"specialization,omitempty" db:"specialization"`
@@ -77,8 +75,6 @@ type User struct {
 	Slug                   string               `json:"slug" db:"slug"`
 	ReferralCode           *string              `json:"referral_code,omitempty" db:"referral_code"`
 	HasActiveSubscription  bool                 `json:"has_active_subscription" db:"has_active_subscription"`
-	IsEmployee             bool                 `json:"is_employee" db:"is_employee"`
-	IsDependent            bool                 `json:"is_dependent" db:"is_dependent"`
 	IsActive               bool                 `json:"is_active" db:"is_active"`
 	OTPRequired            bool                 `json:"otp_required" db:"otp_required"`
 	CreatedBy              *string              `json:"created_by,omitempty" db:"created_by"`
@@ -103,8 +99,6 @@ type UserResponse struct {
 	Status                UserStatus          `json:"status"`
 	SubscriptionStatus    *SubscriptionStatus `json:"subscription_status,omitempty"`
 	InstitutionID         *string             `json:"institution_id,omitempty"`
-	EmployeeID            *string             `json:"employee_id,omitempty"`
-	DependentID           *string             `json:"dependent_id,omitempty"`
 	CommissionPercentage  *int                `json:"commission_percentage,omitempty"`
 	SelerType             *SelerType          `json:"seler_type,omitempty"`
 	Specialization        *string             `json:"specialization,omitempty"`
@@ -112,8 +106,6 @@ type UserResponse struct {
 	Slug                  string              `json:"slug"`
 	ReferralCode          *string             `json:"referral_code,omitempty"`
 	HasActiveSubscription bool                `json:"has_active_subscription"`
-	IsEmployee            bool                `json:"is_employee"`
-	IsDependent           bool                `json:"is_dependent"`
 	IsActive              bool                `json:"is_active"`
 	OTPRequired           bool                `json:"otp_required"`
 	CreatedBy             *string             `json:"created_by,omitempty"`
@@ -206,33 +198,6 @@ type PasswordUpdateRequest struct {
 type PasswordResetConfirmRequest struct {
 	OTP      string `json:"otp" binding:"required"`
 	Password string `json:"password" binding:"required,min=6"`
-}
-
-// UserAssociationRequest represents the request to associate user with employee/dependent
-type UserAssociationRequest struct {
-	UserID      string  `json:"user_id" binding:"required"`
-	EmployeeID  *string `json:"employee_id,omitempty"`
-	DependentID *string `json:"dependent_id,omitempty"`
-}
-
-// BulkSMSRequest represents the request to send bulk SMS
-type BulkSMSRequest struct {
-	Message              string               `json:"message" binding:"required"`
-	Target               *string              `json:"target,omitempty"` // all, members, employees, dependents
-	PackageID            *string              `json:"package_id,omitempty"`
-	SubscriptionStatus   *SubscriptionStatus  `json:"subscription_status,omitempty"`
-}
-
-// BulkSMSCampaign represents a bulk SMS campaign record
-type BulkSMSCampaign struct {
-	ID        uuid.UUID  `json:"id" db:"id"`
-	ClientID  string     `json:"client_id" db:"client_id"`
-	Message   string     `json:"message" db:"message"`
-	Target    string     `json:"target" db:"target"`
-	SentCount int        `json:"sent_count" db:"sent_count"`
-	CreatedBy uuid.UUID  `json:"created_by" db:"created_by"`
-	CreatedAt time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // PaginatedResponse represents a paginated response
