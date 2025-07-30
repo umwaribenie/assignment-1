@@ -237,8 +237,7 @@ func isTokenBlacklisted(token string) bool {
 	query := `SELECT COUNT(*) FROM token_blacklist WHERE token = $1 AND expires_at > NOW()`
 	var count int
 	
-	err := database.DB.QueryRow(query, token).Scan(&count)
-	if err != nil {
+	if err := database.DB.QueryRow(query, token).Scan(&count); err != nil {
 		return false
 	}
 	
