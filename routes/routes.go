@@ -36,9 +36,8 @@ func SetupRoutes() *gin.Engine {
 	// NEW API ROUTES
 	v1 := r.Group("/api/v1/users")
 	{
-		v1.POST("/register", handlers.RegisterNewUser)
+		v1.POST("/register", handlers.RegisterUser)
 		v1.POST("/login", handlers.Login)
-		v1.POST("/verify-login-otp", handlers.VerifyLoginOTP) // ✅ NEW LINE ADDED
 		v1.POST("/password-reset", handlers.RequestPasswordReset)
 		v1.POST("/confirm-password-reset-otp", handlers.ConfirmPasswordReset)
 
@@ -73,8 +72,7 @@ func SetupRoutes() *gin.Engine {
 				// Admin user creation
 				adminOnly.POST("/registerusersbyadmin", handlers.CreateUserByAdmin)
 				
-				// Admin password update
-				adminOnly.POST("/update-password/admin", handlers.UpdatePasswordByAdmin)
+
 				
 				// User deletion
 				adminOnly.DELETE("/:id", handlers.DeleteUser)

@@ -279,27 +279,3 @@ type LoginOTP struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
-// New structs for OTP verification endpoint
-type VerifyLoginOTPRequest struct {
-	OTP string `json:"otp" binding:"required" example:"123456"`
-}
-
-type VerifyLoginOTPUserResponse struct {
-	ID             uuid.UUID `json:"id"`
-	ClientID       string    `json:"clientId"`
-	Email          string    `json:"email"`
-	FirstName      string    `json:"firstName"`
-	LastName       string    `json:"lastName"`
-	NationalID     *string   `json:"nationalId,omitempty"`
-	PassportNumber *string   `json:"passportNumber,omitempty"`
-	Phone          string    `json:"phone"`
-	ProfilePicture *string   `json:"profilePicture,omitempty"`
-	Username       string    `json:"username"`
-	Role           UserRole  `json:"role"`
-	Status         UserStatus `json:"status"`
-}
-
-type VerifyLoginOTPResponse struct {
-	AccessToken string                     `json:"access_token"`
-	User        VerifyLoginOTPUserResponse `json:"user"`
-}

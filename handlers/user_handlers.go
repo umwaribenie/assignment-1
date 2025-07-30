@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"fmt"
 	"generalusermanagement/database"
 	"generalusermanagement/models"

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"generalusermanagement/database"
 	"generalusermanagement/models"
 	"generalusermanagement/utils"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // @Summary User Login
@@ -160,90 +158,3 @@ func Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, models.APIResponse{Success: true, Message: "Logged out successfully"})
 }
 
-// @Summary Verify login OTP
-// @Description Verifies user login OTP and returns JWT
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param otpData body models.VerifyLoginOTPRequest true "OTP verification"
-// @Success 200 {object} models.VerifyLoginOTPResponse
-// @Failure 400 {object} models.ErrorResponse
-// @Router /verify-login-otp [post]
-func VerifyLoginOTP(c *gin.Context) {
-	var req models.VerifyLoginOTPRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "Invalid request data"})
-		return
-	}
-
-	// Find and validate OTP
-	var userEmail string
-	var otpRecord models.LoginOTP
-	err := database.DB.QueryRow(`
-		SELECT email, otp, expires_at, used 
-		FROM login_otps 
-		WHERE otp = $1 AND used = false AND expires_at > $2
-	`, req.OTP, time.Now()).Scan(&otpRecord.Email, &otpRecord.OTP, &otpRecord.ExpiresAt, &otpRecord.Used)
-
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "Invalid or expired OTP"})
-		return
-	}
-
-	userEmail = otpRecord.Email
-
-	// Mark OTP as used
-	_, err = database.DB.Exec(`UPDATE login_otps SET used = true WHERE otp = $1`, req.OTP)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to verify OTP"})
-		return
-	}
-
-	// Get user details
-	var user models.User
-	err = database.DB.QueryRow(`
-		SELECT id, client_id, email, first_name, last_name, national_id, passport_number, 
-		       phone, profile_picture, username, role, status, slug 
-		FROM users 
-		WHERE email = $1 AND deleted_at IS NULL
-	`, userEmail).Scan(
-		&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName,
-		&user.NationalID, &user.PassportNumber, &user.Phone, &user.ProfilePicture,
-		&user.Username, &user.Role, &user.Status, &user.Slug,
-	)
-
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "User not found"})
-		return
-	}
-
-	// Generate JWT token
-	token, err := utils.GenerateJWT(user.ID.String(), string(user.Role), user.ClientID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to generate token"})
-		return
-	}
-
-	// Prepare user response
-	userResponse := models.VerifyLoginOTPUserResponse{
-		ID:             user.ID,
-		ClientID:       user.ClientID,
-		Email:          user.Email,
-		FirstName:      user.FirstName,
-		LastName:       user.LastName,
-		NationalID:     user.NationalID,
-		PassportNumber: user.PassportNumber,
-		Phone:          user.Phone,
-		ProfilePicture: user.ProfilePicture,
-		Username:       user.Username,
-		Role:           user.Role,
-		Status:         user.Status,
-	}
-
-	response := models.VerifyLoginOTPResponse{
-		AccessToken: token,
-		User:        userResponse,
-	}
-
-	c.JSON(http.StatusOK, response)
-}
