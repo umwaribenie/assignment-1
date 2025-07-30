@@ -7,6 +7,7 @@ import (
 	"generalusermanagement/config"
 	"generalusermanagement/models"
 	"math/big"
+	"regexp"
 	"strings"
 	"time"
 
@@ -113,4 +114,125 @@ func GenerateOTP() (string, error) {
 // GenerateClientID generates a unique client ID
 func GenerateClientID() string {
 	return fmt.Sprintf("USR_%d_%s", time.Now().Unix(), uuid.New().String()[:8])
+}
+
+// GenerateSlug generates a URL-friendly slug from a string
+func GenerateSlug(text string) string {
+	// Convert to lowercase
+	slug := strings.ToLower(text)
+	
+	// Replace spaces and special characters with hyphens
+	reg := regexp.MustCompile(`[^a-z0-9]+`)
+	slug = reg.ReplaceAllString(slug, "-")
+	
+	// Remove leading and trailing hyphens
+	slug = strings.Trim(slug, "-")
+	
+	// If slug is empty, generate a random one
+	if slug == "" {
+		slug = fmt.Sprintf("user-%s", uuid.New().String()[:8])
+	}
+	
+	return slug
+}
+
+// GenerateUniqueSlug generates a unique slug by appending a random string if needed
+func GenerateUniqueSlug(baseText string, userID string) string {
+	baseSlug := GenerateSlug(baseText)
+	
+	// Append first 8 characters of user ID to ensure uniqueness
+	if userID != "" {
+		baseSlug = fmt.Sprintf("%s-%s", baseSlug, userID[:8])
+	} else {
+		baseSlug = fmt.Sprintf("%s-%s", baseSlug, uuid.New().String()[:8])
+	}
+	
+	return baseSlug
+}
+
+// GenerateReferralCode generates a unique referral code
+func GenerateReferralCode() (string, error) {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const length = 8
+	
+	result := make([]byte, length)
+	for i := range result {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = charset[num.Int64()]
+	}
+	
+	return string(result), nil
+}
+
+// ValidateRole checks if a role is valid
+func ValidateRole(role models.UserRole) bool {
+	validRoles := []models.UserRole{
+		models.RoleUser,
+		models.RoleAdmin,
+		models.RoleSuperAdmin,
+		models.RoleTrainer,
+		models.RoleInstructor,
+		models.RoleFrontdesk,
+		models.RoleFinance,
+		models.RoleSeler,
+		models.RoleMember,
+	}
+	
+	for _, validRole := range validRoles {
+		if role == validRole {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateSubscriptionStatus checks if a subscription status is valid
+func ValidateSubscriptionStatus(status models.SubscriptionStatus) bool {
+	validStatuses := []models.SubscriptionStatus{
+		models.SubscriptionActive,
+		models.SubscriptionInactive,
+		models.SubscriptionExpired,
+		models.SubscriptionOnHold,
+		models.SubscriptionPaused,
+		models.SubscriptionCanceled,
+	}
+	
+	for _, validStatus := range validStatuses {
+		if status == validStatus {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateSelerType checks if a seller type is valid
+func ValidateSelerType(selerType models.SelerType) bool {
+	return selerType == models.SelerTypeSeler || selerType == models.SelerTypePromoter
+}
+
+// IsAdminRole checks if a role has admin privileges
+func IsAdminRole(role models.UserRole) bool {
+	return role == models.RoleAdmin || role == models.RoleSuperAdmin
+}
+
+// CanManageUsers checks if a role can manage other users
+func CanManageUsers(role models.UserRole) bool {
+	return role == models.RoleAdmin || role == models.RoleSuperAdmin || role == models.RoleFrontdesk
+}
+
+// GenerateUsername generates a username from first and last name
+func GenerateUsername(firstName, lastName string) string {
+	username := strings.ToLower(fmt.Sprintf("%s.%s", firstName, lastName))
+	
+	// Remove special characters
+	reg := regexp.MustCompile(`[^a-z0-9.]`)
+	username = reg.ReplaceAllString(username, "")
+	
+	// Add random suffix to ensure uniqueness
+	username = fmt.Sprintf("%s.%s", username, uuid.New().String()[:4])
+	
+	return username
 }

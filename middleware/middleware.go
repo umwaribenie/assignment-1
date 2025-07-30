@@ -59,7 +59,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// AdminOnly middleware ensures only admin users can access the endpoint
+// AdminOnly middleware ensures only admin or super_admin users can access the endpoint
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userRole, exists := c.Get("user_role")
@@ -72,10 +72,38 @@ func AdminOnly() gin.HandlerFunc {
 			return
 		}
 
-		if userRole != models.RoleAdmin {
+		role := userRole.(models.UserRole)
+		if !utils.IsAdminRole(role) {
 			c.JSON(http.StatusForbidden, models.APIResponse{
 				Success: false,
 				Message: "Admin access required",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// UserManagementAccess middleware allows users with user management capabilities
+func UserManagementAccess() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userRole, exists := c.Get("user_role")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, models.APIResponse{
+				Success: false,
+				Message: "User role not found in token",
+			})
+			c.Abort()
+			return
+		}
+
+		role := userRole.(models.UserRole)
+		if !utils.CanManageUsers(role) {
+			c.JSON(http.StatusForbidden, models.APIResponse{
+				Success: false,
+				Message: "User management access required",
 			})
 			c.Abort()
 			return
@@ -99,13 +127,21 @@ func UserOrAdmin() gin.HandlerFunc {
 			return
 		}
 
-		// If admin, allow access to everything
-		if userRole == models.RoleAdmin {
+		role := userRole.(models.UserRole)
+		
+		// If admin or super admin, allow access to everything
+		if utils.IsAdminRole(role) {
 			c.Next()
 			return
 		}
 
-		// If user, check if they're accessing their own data
+		// If frontdesk or other user management roles, allow limited access
+		if utils.CanManageUsers(role) {
+			c.Next()
+			return
+		}
+
+		// If regular user, check if they're accessing their own data
 		userID, _ := c.Get("user_id")
 		requestedUserID := c.Param("id")
 		
@@ -119,6 +155,63 @@ func UserOrAdmin() gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+// SuperAdminOnly middleware ensures only super_admin users can access the endpoint
+func SuperAdminOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userRole, exists := c.Get("user_role")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, models.APIResponse{
+				Success: false,
+				Message: "User role not found in token",
+			})
+			c.Abort()
+			return
+		}
+
+		if userRole != models.RoleSuperAdmin {
+			c.JSON(http.StatusForbidden, models.APIResponse{
+				Success: false,
+				Message: "Super admin access required",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// RoleBasedAccess middleware allows access based on specific roles
+func RoleBasedAccess(allowedRoles ...models.UserRole) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userRole, exists := c.Get("user_role")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, models.APIResponse{
+				Success: false,
+				Message: "User role not found in token",
+			})
+			c.Abort()
+			return
+		}
+
+		role := userRole.(models.UserRole)
+		
+		// Check if user role is in allowed roles
+		for _, allowedRole := range allowedRoles {
+			if role == allowedRole {
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusForbidden, models.APIResponse{
+			Success: false,
+			Message: "Insufficient permissions for this operation",
+		})
+		c.Abort()
 	}
 }
 
@@ -144,8 +237,7 @@ func isTokenBlacklisted(token string) bool {
 	query := `SELECT COUNT(*) FROM token_blacklist WHERE token = $1 AND expires_at > NOW()`
 	var count int
 	
-	err := database.DB.QueryRow(query, token).Scan(&count)
-	if err != nil {
+	if err := database.DB.QueryRow(query, token).Scan(&count); err != nil {
 		return false
 	}
 	
