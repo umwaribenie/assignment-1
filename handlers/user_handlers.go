@@ -221,8 +221,8 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	var createdUser models.User
-	err = database.DB.QueryRow(`INSERT INTO users (client_id, email, first_name, last_name, national_id, passport_number, password, phone, profile_picture, username) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, created_at, updated_at`,
-		req.ClientID, req.Email, req.FirstName, req.LastName, req.NationalID, req.PassportNumber, hashedPassword, req.Phone, req.ProfilePicture, username).Scan(&createdUser.ID, &createdUser.CreatedAt, &createdUser.UpdatedAt)
+	err = database.DB.QueryRow(`INSERT INTO users (client_id, email, first_name, last_name, national_id, passport_number, password, phone, username) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, updated_at`,
+		req.ClientID, req.Email, req.FirstName, req.LastName, req.NationalID, req.PassportNumber, hashedPassword, req.Phone, username).Scan(&createdUser.ID, &createdUser.CreatedAt, &createdUser.UpdatedAt)
 	
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to create user"})
@@ -230,17 +230,20 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// Return the exact format you want
-	userResponse := models.RegisterResponse{
+	userResponse := models.UserResponse{
+		ID:             createdUser.ID,
 		ClientID:       req.ClientID,
 		Email:          req.Email,
 		FirstName:      req.FirstName,
 		LastName:       req.LastName,
 		NationalID:     req.NationalID,
 		PassportNumber: req.PassportNumber,
-		Password:       req.Password, // Shows password in response
 		Phone:          req.Phone,
-		ProfilePicture: req.ProfilePicture,
 		Username:       username,
+		Role:           models.RoleUser,
+		Status:         models.StatusActive,
+		CreatedAt:      createdUser.CreatedAt,
+		UpdatedAt:      createdUser.UpdatedAt,
 	}
 
 	c.JSON(http.StatusOK, userResponse)
