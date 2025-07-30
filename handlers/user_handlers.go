@@ -15,23 +15,25 @@ import (
 	"github.com/google/uuid"
 )
 
-// @Summary Get All Users
-// @Description Get paginated list of users with optional filtering
+// @Summary Get all users
+// @Description Get all users
 // @Tags Users
 // @Produce json
 // @Security BearerAuth
-// @Param pageNumber query int false "Page number" default(1)
-// @Param pageSize query int false "Page size" default(10)
-// @Param role query string false "Filter by role"
-// @Param status query string false "Filter by status"
-// @Param search query string false "Search in email, username, first_name, last_name"
+// @Param pageNumber query int false "Page Number"
+// @Param pageSize query int false "Page Size"
+// @Param from query string false "From Date"
+// @Param to query string false "To Date"
+// @Param search query string false "Search"
+// @Param role query string false "Role" Enums(user, admin, super_admin)
+// @Param status query string false "Status" Enums(active, inactive, deleted)
 // @Success 200 {object} models.PaginatedResponse
-// @Failure 401 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
 // @Router /users [get]
 func GetAllUsers(c *gin.Context) {
 	pageNumber := 1
 	pageSize := 10
-	
+
 	if p, err := strconv.Atoi(c.DefaultQuery("pageNumber", "1")); err == nil && p > 0 {
 		pageNumber = p
 	}
@@ -41,6 +43,7 @@ func GetAllUsers(c *gin.Context) {
 
 	filter := models.UserFilter{PageNumber: pageNumber, PageSize: pageSize}
 
+	// Role filter
 	if roleStr := c.Query("role"); roleStr != "" {
 		role := models.UserRole(roleStr)
 		if utils.ValidateRole(role) {
@@ -48,14 +51,20 @@ func GetAllUsers(c *gin.Context) {
 		}
 	}
 
+	// Status filter
 	if statusStr := c.Query("status"); statusStr != "" {
 		status := models.UserStatus(statusStr)
 		filter.Status = &status
 	}
 
+	// Search filter
 	if search := c.Query("search"); search != "" {
 		filter.Search = &search
 	}
+
+	// Date filters
+	from := c.Query("from")
+	to := c.Query("to")
 
 	baseQuery := `SELECT id, client_id, email, first_name, last_name, phone, username, role, status, slug, created_at, updated_at FROM users WHERE deleted_at IS NULL`
 	countQuery := "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"
@@ -80,6 +89,18 @@ func GetAllUsers(c *gin.Context) {
 		searchPattern := "%" + *filter.Search + "%"
 		conditions = append(conditions, fmt.Sprintf("(email ILIKE $%d OR username ILIKE $%d OR first_name ILIKE $%d OR last_name ILIKE $%d)", argIndex, argIndex, argIndex, argIndex))
 		args = append(args, searchPattern)
+		argIndex++
+	}
+
+	if from != "" {
+		conditions = append(conditions, fmt.Sprintf("DATE(created_at) >= $%d", argIndex))
+		args = append(args, from)
+		argIndex++
+	}
+
+	if to != "" {
+		conditions = append(conditions, fmt.Sprintf("DATE(created_at) <= $%d", argIndex))
+		args = append(args, to)
 		argIndex++
 	}
 
@@ -132,8 +153,25 @@ func GetAllUsers(c *gin.Context) {
 
 	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
 
+	// Calculate nextPage and previousPage
+	var nextPage, previousPage *int
+	if pageNumber < totalPages {
+		next := pageNumber + 1
+		nextPage = &next
+	}
+	if pageNumber > 1 {
+		prev := pageNumber - 1
+		previousPage = &prev
+	}
+
 	response := models.PaginatedResponse{
-		List: users, CurrentPage: pageNumber, LastPage: totalPages, Total: total, Status: "success",
+		List:         users,
+		CurrentPage:  pageNumber,
+		LastPage:     totalPages,
+		NextPage:     nextPage,
+		PreviousPage: previousPage,
+		Total:        total,
+		Status:       "success",
 	}
 
 	c.JSON(http.StatusOK, response)
