@@ -1,9 +1,11 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"generalusermanagement/config"
 
@@ -182,4 +184,99 @@ func CloseDB() {
 	if DB != nil {
 		DB.Close()
 	}
+}
+
+// DatabaseStats returns current database connection statistics
+func DatabaseStats() sql.DBStats {
+	return DB.Stats()
+}
+
+// HealthCheck performs a basic database health check
+func HealthCheck() error {
+	return DB.Ping()
+}
+
+// BeginTransaction starts a new database transaction
+func BeginTransaction() (*sql.Tx, error) {
+	return DB.Begin()
+}
+
+// ExecuteWithTimeout executes a query with a timeout
+func ExecuteWithTimeout(query string, args ...interface{}) (sql.Result, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return DB.ExecContext(ctx, query, args...)
+}
+
+// QueryWithTimeout executes a query with a timeout and returns rows
+func QueryWithTimeout(query string, args ...interface{}) (*sql.Rows, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return DB.QueryContext(ctx, query, args...)
+}
+
+// PostgreSQL-specific helper functions
+
+// IsUUIDValid checks if a string is a valid UUID format
+func IsUUIDValid(uuid string) bool {
+	if len(uuid) != 36 {
+		return false
+	}
+	// Basic UUID format check: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	for i, char := range uuid {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if char != '-' {
+				return false
+			}
+		} else {
+			if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// FormatConnectionString returns a formatted PostgreSQL connection string
+func FormatConnectionString(host, port, user, password, dbname, sslmode string) string {
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, password, dbname, sslmode)
+}
+
+// GetDatabaseInfo returns basic database information
+func GetDatabaseInfo() (map[string]interface{}, error) {
+	info := make(map[string]interface{})
+
+	// Get database name
+	var dbName string
+	err := DB.QueryRow("SELECT current_database()").Scan(&dbName)
+	if err != nil {
+		return nil, err
+	}
+	info["database_name"] = dbName
+
+	// Get PostgreSQL version
+	var version string
+	err = DB.QueryRow("SELECT version()").Scan(&version)
+	if err != nil {
+		return nil, err
+	}
+	info["postgresql_version"] = version
+
+	// Get current user
+	var currentUser string
+	err = DB.QueryRow("SELECT current_user").Scan(&currentUser)
+	if err != nil {
+		return nil, err
+	}
+	info["current_user"] = currentUser
+
+	// Get connection stats
+	stats := DB.Stats()
+	info["max_open_connections"] = stats.MaxOpenConnections
+	info["open_connections"] = stats.OpenConnections
+	info["in_use"] = stats.InUse
+	info["idle"] = stats.Idle
+
+	return info, nil
 }
