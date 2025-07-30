@@ -225,7 +225,7 @@ func VerifyLoginOTP(c *gin.Context) {
 	}
 
 	// Prepare user response
-	userResponse := models.UserResponse{
+	userResponse := models.VerifyLoginOTPUserResponse{
 		ID:             user.ID,
 		ClientID:       user.ClientID,
 		Email:          user.Email,
