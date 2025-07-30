@@ -278,3 +278,13 @@ type LoginOTP struct {
 	Used      bool      `json:"used" db:"used"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
+
+// New structs for OTP verification endpoint
+type VerifyLoginOTPRequest struct {
+	OTP string `json:"otp" binding:"required" example:"123456"`
+}
+
+type VerifyLoginOTPResponse struct {
+	AccessToken string       `json:"access_token"`
+	User        UserResponse `json:"user"`
+}

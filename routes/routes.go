@@ -33,19 +33,13 @@ func SetupRoutes() *gin.Engine {
 	// File serving routes (public access)
 	r.GET("/files/:filename", handlers.ServeFile)
 
-	// API version 1 routes with base path /api/v1/users
+	// NEW API ROUTES
 	v1 := r.Group("/api/v1/users")
 	{
-		// Public routes (no authentication required)
-		
-		// User Registration
-		v1.POST("/register", handlers.RegisterUser)
-		
-		// Authentication routes
+		v1.POST("/register", handlers.RegisterNewUser)
 		v1.POST("/login", handlers.Login)
-		v1.POST("/verify-login-otp", handlers.VerifyLoginOTP)
+		v1.POST("/verify-login-otp", handlers.VerifyLoginOTP) // ✅ NEW LINE ADDED
 		v1.POST("/password-reset", handlers.RequestPasswordReset)
-		v1.POST("/reset-password/email", handlers.ResetPasswordWithEmail)
 		v1.POST("/confirm-password-reset-otp", handlers.ConfirmPasswordReset)
 
 		// Protected routes (authentication required)
