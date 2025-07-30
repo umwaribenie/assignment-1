@@ -19,7 +19,7 @@ type Config struct {
 	JWTExpiryHours int
 	ServerPort     string
 	ServerHost     string
-	Port           string  // Alias for ServerPort
+	Port           string // Alias for ServerPort
 	UploadPath     string
 	MaxFileSize    int64
 	Environment    string
@@ -45,7 +45,7 @@ func LoadConfig() {
 		JWTExpiryHours: getEnvAsInt("JWT_EXPIRY_HOURS", 24),
 		ServerPort:     port,
 		ServerHost:     getEnv("SERVER_HOST", "localhost"),
-		Port:           port,  // Set the same value for both
+		Port:           port, // Set the same value for both
 		UploadPath:     getEnv("UPLOAD_PATH", "./uploads"),
 		MaxFileSize:    getEnvAsInt64("MAX_FILE_SIZE", 5242880), // 5MB
 		Environment:    getEnv("ENV", "development"),

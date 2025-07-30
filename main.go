@@ -1,11 +1,11 @@
 package main
 
 import (
-	"log"
 	"generalusermanagement/config"
 	"generalusermanagement/database"
-	"generalusermanagement/routes"
 	_ "generalusermanagement/docs" // This line is important for go-swagger
+	"generalusermanagement/routes"
+	"log"
 )
 
 // @title User Management API
@@ -34,7 +34,7 @@ func main() {
 	defer database.CloseDB()
 
 	r := routes.SetupRoutes()
-	
+
 	log.Printf("Server starting on port %s", config.AppConfig.Port)
 	log.Fatal(r.Run(":" + config.AppConfig.Port))
 }

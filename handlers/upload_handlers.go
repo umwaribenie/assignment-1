@@ -31,7 +31,7 @@ import (
 // @Router /upload/profile-picture [post]
 func UploadProfilePicture(c *gin.Context) {
 	userID, _ := c.Get("user_id")
-	
+
 	userUUID, err := uuid.Parse(userID.(string))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.APIResponse{
@@ -146,7 +146,7 @@ func UploadProfilePicture(c *gin.Context) {
 // @Router /files/{filename} [get]
 func ServeFile(c *gin.Context) {
 	filename := c.Param("filename")
-	
+
 	// Validate filename to prevent directory traversal
 	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
 		c.JSON(http.StatusBadRequest, models.APIResponse{
@@ -157,7 +157,7 @@ func ServeFile(c *gin.Context) {
 	}
 
 	filePath := filepath.Join(config.AppConfig.UploadPath, filename)
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, models.APIResponse{
@@ -184,7 +184,7 @@ func ServeFile(c *gin.Context) {
 // @Router /upload/profile-picture [delete]
 func DeleteProfilePicture(c *gin.Context) {
 	userID, _ := c.Get("user_id")
-	
+
 	userUUID, err := uuid.Parse(userID.(string))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.APIResponse{

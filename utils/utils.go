@@ -30,18 +30,18 @@ func CheckPasswordHash(password, hash string) bool {
 
 // Claims represents the JWT claims
 type Claims struct {
-	UserID   string           `json:"user_id"`
-	Email    string           `json:"email"`
-	Role     models.UserRole  `json:"role"`
-	Username string           `json:"username"`
-	ClientID string           `json:"client_id"`
+	UserID   string          `json:"user_id"`
+	Email    string          `json:"email"`
+	Role     models.UserRole `json:"role"`
+	Username string          `json:"username"`
+	ClientID string          `json:"client_id"`
 	jwt.RegisteredClaims
 }
 
 // GenerateJWT generates a JWT token for a user
 func GenerateJWT(user models.User) (string, time.Time, error) {
 	expirationTime := time.Now().Add(time.Duration(config.AppConfig.JWTExpiryHours) * time.Hour)
-	
+
 	claims := &Claims{
 		UserID:   user.ID.String(),
 		Email:    user.Email,
@@ -60,14 +60,14 @@ func GenerateJWT(user models.User) (string, time.Time, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(config.AppConfig.JWTSecret))
-	
+
 	return tokenString, expirationTime, err
 }
 
 // ValidateJWT validates a JWT token and returns the claims
 func ValidateJWT(tokenString string) (*Claims, error) {
 	claims := &Claims{}
-	
+
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -107,7 +107,7 @@ func GenerateOTP() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
@@ -120,33 +120,33 @@ func GenerateClientID() string {
 func GenerateSlug(text string) string {
 	// Convert to lowercase
 	slug := strings.ToLower(text)
-	
+
 	// Replace spaces and special characters with hyphens
 	reg := regexp.MustCompile(`[^a-z0-9]+`)
 	slug = reg.ReplaceAllString(slug, "-")
-	
+
 	// Remove leading and trailing hyphens
 	slug = strings.Trim(slug, "-")
-	
+
 	// If slug is empty, generate a random one
 	if slug == "" {
 		slug = fmt.Sprintf("user-%s", uuid.New().String()[:8])
 	}
-	
+
 	return slug
 }
 
 // GenerateUniqueSlug generates a unique slug by appending a random string if needed
 func GenerateUniqueSlug(baseText string, userID string) string {
 	baseSlug := GenerateSlug(baseText)
-	
+
 	// Append first 8 characters of user ID to ensure uniqueness
 	if userID != "" {
 		baseSlug = fmt.Sprintf("%s-%s", baseSlug, userID[:8])
 	} else {
 		baseSlug = fmt.Sprintf("%s-%s", baseSlug, uuid.New().String()[:8])
 	}
-	
+
 	return baseSlug
 }
 
@@ -154,7 +154,7 @@ func GenerateUniqueSlug(baseText string, userID string) string {
 func GenerateReferralCode() (string, error) {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	const length = 8
-	
+
 	result := make([]byte, length)
 	for i := range result {
 		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
@@ -163,7 +163,7 @@ func GenerateReferralCode() (string, error) {
 		}
 		result[i] = charset[num.Int64()]
 	}
-	
+
 	return string(result), nil
 }
 
@@ -180,7 +180,7 @@ func ValidateRole(role models.UserRole) bool {
 		models.RoleSeler,
 		models.RoleMember,
 	}
-	
+
 	for _, validRole := range validRoles {
 		if role == validRole {
 			return true
@@ -199,7 +199,7 @@ func ValidateSubscriptionStatus(status models.SubscriptionStatus) bool {
 		models.SubscriptionPaused,
 		models.SubscriptionCanceled,
 	}
-	
+
 	for _, validStatus := range validStatuses {
 		if status == validStatus {
 			return true
@@ -226,13 +226,13 @@ func CanManageUsers(role models.UserRole) bool {
 // GenerateUsername generates a username from first and last name
 func GenerateUsername(firstName, lastName string) string {
 	username := strings.ToLower(fmt.Sprintf("%s.%s", firstName, lastName))
-	
+
 	// Remove special characters
 	reg := regexp.MustCompile(`[^a-z0-9.]`)
 	username = reg.ReplaceAllString(username, "")
-	
+
 	// Add random suffix to ensure uniqueness
 	username = fmt.Sprintf("%s.%s", username, uuid.New().String()[:4])
-	
+
 	return username
 }

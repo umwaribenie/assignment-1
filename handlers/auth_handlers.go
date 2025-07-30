@@ -29,7 +29,7 @@ func Login(c *gin.Context) {
 
 	var user models.User
 	query := `SELECT id, client_id, email, first_name, last_name, password, phone, username, role, status, slug, created_at, updated_at FROM users WHERE (username = $1 OR email = $1) AND deleted_at IS NULL`
-	
+
 	err := database.DB.QueryRow(query, req.Username).Scan(
 		&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName, &user.Password, &user.Phone, &user.Username, &user.Role, &user.Status, &user.Slug, &user.CreatedAt, &user.UpdatedAt)
 
@@ -157,4 +157,3 @@ func Logout(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.APIResponse{Success: true, Message: "Logged out successfully"})
 }
-

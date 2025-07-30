@@ -31,7 +31,7 @@ import (
 func GetAllUsers(c *gin.Context) {
 	pageNumber := 1
 	pageSize := 10
-	
+
 	if p, err := strconv.Atoi(c.DefaultQuery("pageNumber", "1")); err == nil && p > 0 {
 		pageNumber = p
 	}
@@ -223,7 +223,7 @@ func RegisterUser(c *gin.Context) {
 	var createdUser models.User
 	err = database.DB.QueryRow(`INSERT INTO users (client_id, email, first_name, last_name, national_id, passport_number, password, phone, username) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, updated_at`,
 		req.ClientID, req.Email, req.FirstName, req.LastName, req.NationalID, req.PassportNumber, hashedPassword, req.Phone, username).Scan(&createdUser.ID, &createdUser.CreatedAt, &createdUser.UpdatedAt)
-	
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to create user"})
 		return
@@ -279,7 +279,7 @@ func CreateUserByAdmin(c *gin.Context) {
 	}
 	userID := uuid.New()
 	clientID := utils.GenerateClientID()
-	
+
 	username := ""
 	if req.Username != nil {
 		username = *req.Username
@@ -395,7 +395,7 @@ func UpdatePassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to hash new password"})
 		return
 	}
-	
+
 	if _, err := database.DB.Exec(`UPDATE users SET password = $1 WHERE id = $2`, newPasswordHash, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to update password"})
 		return

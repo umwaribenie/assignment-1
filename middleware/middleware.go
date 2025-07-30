@@ -14,7 +14,7 @@ import (
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		
+
 		token, err := utils.ExtractTokenFromHeader(authHeader)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, models.APIResponse{
@@ -128,7 +128,7 @@ func UserOrAdmin() gin.HandlerFunc {
 		}
 
 		role := userRole.(models.UserRole)
-		
+
 		// If admin or super admin, allow access to everything
 		if utils.IsAdminRole(role) {
 			c.Next()
@@ -144,7 +144,7 @@ func UserOrAdmin() gin.HandlerFunc {
 		// If regular user, check if they're accessing their own data
 		userID, _ := c.Get("user_id")
 		requestedUserID := c.Param("id")
-		
+
 		if requestedUserID != "" && userID != requestedUserID {
 			c.JSON(http.StatusForbidden, models.APIResponse{
 				Success: false,
@@ -198,7 +198,7 @@ func RoleBasedAccess(allowedRoles ...models.UserRole) gin.HandlerFunc {
 		}
 
 		role := userRole.(models.UserRole)
-		
+
 		// Check if user role is in allowed roles
 		for _, allowedRole := range allowedRoles {
 			if role == allowedRole {
@@ -236,11 +236,11 @@ func CORSMiddleware() gin.HandlerFunc {
 func isTokenBlacklisted(token string) bool {
 	query := `SELECT COUNT(*) FROM token_blacklist WHERE token = $1 AND expires_at > NOW()`
 	var count int
-	
+
 	if err := database.DB.QueryRow(query, token).Scan(&count); err != nil {
 		return false
 	}
-	
+
 	return count > 0
 }
 

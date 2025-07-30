@@ -116,9 +116,9 @@ func createTables() {
 	`
 
 	tables := []string{
-		createUsersTable, 
-		createTokenBlacklistTable, 
-		createPasswordResetTable, 
+		createUsersTable,
+		createTokenBlacklistTable,
+		createPasswordResetTable,
 		createLoginOTPTable,
 		createIndexes,
 	}

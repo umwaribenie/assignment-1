@@ -13,7 +13,7 @@ import (
 func SetupRoutes() *gin.Engine {
 	// Set Gin mode
 	gin.SetMode(gin.ReleaseMode)
-	
+
 	r := gin.Default()
 
 	// Apply CORS middleware globally
@@ -47,14 +47,14 @@ func SetupRoutes() *gin.Engine {
 		{
 			// Authentication status check
 			protected.GET("/check", handlers.CheckAuth)
-			
+
 			// Password update routes
 			protected.POST("/update-password", handlers.UpdatePassword)
 
 			// User lookup routes
 			protected.GET("/slug/:slug", handlers.GetUserBySlug)
 			protected.GET("/:id", handlers.GetUserByID)
-			
+
 			// User management routes that require proper authorization
 			userOrAdmin := protected.Group("/")
 			userOrAdmin.Use(middleware.UserOrAdmin())
@@ -68,12 +68,10 @@ func SetupRoutes() *gin.Engine {
 			{
 				// Get all users with advanced filtering
 				adminOnly.GET("/", handlers.GetAllUsers)
-				
+
 				// Admin user creation
 				adminOnly.POST("/registerusersbyadmin", handlers.CreateUserByAdmin)
-				
 
-				
 				// User deletion
 				adminOnly.DELETE("/:id", handlers.DeleteUser)
 			}
