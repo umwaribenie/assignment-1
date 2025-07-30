@@ -90,23 +90,42 @@ func GetAllUsers(c *gin.Context) {
 	}
 
 	var total int64
-	database.DB.QueryRow(countQuery, args...).Scan(&total)
+	if err := database.DB.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to count users"})
+		return
+	}
 
 	offset := (pageNumber - 1) * pageSize
 	baseQuery += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
 	args = append(args, pageSize, offset)
 
-	rows, _ := database.DB.Query(baseQuery, args...)
+	rows, err := database.DB.Query(baseQuery, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to query users"})
+		return
+	}
 	defer rows.Close()
 
 	var users []models.UserResponse
 	for rows.Next() {
 		var user models.User
-		rows.Scan(&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName, &user.Phone, &user.Username, &user.Role, &user.Status, &user.Slug, &user.CreatedAt, &user.UpdatedAt)
+		if err := rows.Scan(&user.ID, &user.ClientID, &user.Email, &user.FirstName, &user.LastName, &user.Phone, &user.Username, &user.Role, &user.Status, &user.Slug, &user.CreatedAt, &user.UpdatedAt); err != nil {
+			continue
+		}
 
-		userResponse := models.UserResponse{ID: user.ID, ClientID: user.ClientID, Email: user.Email, FirstName: user.FirstName,
-			LastName: user.LastName, Phone: user.Phone, Username: user.Username, Role: user.Role,
-			Status: user.Status, Slug: user.Slug, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt,
+		userResponse := models.UserResponse{
+			ID:        user.ID,
+			ClientID:  user.ClientID,
+			Email:     user.Email,
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			Phone:     user.Phone,
+			Username:  user.Username,
+			Role:      user.Role,
+			Status:    user.Status,
+			Slug:      user.Slug,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
 		}
 		users = append(users, userResponse)
 	}
@@ -186,27 +205,43 @@ func GetUserBySlug(c *gin.Context) {
 func RegisterUser(c *gin.Context) {
 	var req models.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid request data"})
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "Invalid request data"})
 		return
 	}
 
-	hashedPassword, _ := utils.HashPassword(req.Password)
-	userID := uuid.New()
-	
+	hashedPassword, err := utils.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to hash password"})
+		return
+	}
+
 	username := req.Username
 	if username == "" {
 		username = utils.GenerateUsername(req.FirstName, req.LastName)
 	}
 
-	slug := utils.GenerateUniqueSlug(username, userID.String())
-	referralCode, _ := utils.GenerateReferralCode()
-
-	now := time.Now()
 	var createdUser models.User
-	database.DB.QueryRow(`INSERT INTO users (id, client_id, email, first_name, last_name, password, phone, username, role, status, slug, referral_code, has_active_subscription, is_active, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, created_at, updated_at`,
-		userID, req.ClientID, req.Email, req.FirstName, req.LastName, hashedPassword, req.Phone, username, models.RoleUser, models.StatusActive, slug, referralCode, false, true, now, now).Scan(&createdUser.ID, &createdUser.CreatedAt, &createdUser.UpdatedAt)
+	err = database.DB.QueryRow(`INSERT INTO users (client_id, email, first_name, last_name, national_id, passport_number, password, phone, profile_picture, username) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, created_at, updated_at`,
+		req.ClientID, req.Email, req.FirstName, req.LastName, req.NationalID, req.PassportNumber, hashedPassword, req.Phone, req.ProfilePicture, username).Scan(&createdUser.ID, &createdUser.CreatedAt, &createdUser.UpdatedAt)
+	
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to create user"})
+		return
+	}
 
-	userResponse := models.UserResponse{ID: userID, ClientID: req.ClientID, Email: req.Email, FirstName: req.FirstName, LastName: req.LastName, Phone: req.Phone, Username: username, Role: models.RoleUser, Status: models.StatusActive, Slug: slug, CreatedAt: createdUser.CreatedAt, UpdatedAt: createdUser.UpdatedAt}
+	// Return the exact format you want
+	userResponse := models.RegisterResponse{
+		ClientID:       req.ClientID,
+		Email:          req.Email,
+		FirstName:      req.FirstName,
+		LastName:       req.LastName,
+		NationalID:     req.NationalID,
+		PassportNumber: req.PassportNumber,
+		Password:       req.Password, // Shows password in response
+		Phone:          req.Phone,
+		ProfilePicture: req.ProfilePicture,
+		Username:       username,
+	}
 
 	c.JSON(http.StatusOK, userResponse)
 }
@@ -234,7 +269,11 @@ func CreateUserByAdmin(c *gin.Context) {
 		return
 	}
 
-	hashedPassword, _ := utils.HashPassword(req.Password)
+	hashedPassword, err := utils.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to hash password"})
+		return
+	}
 	userID := uuid.New()
 	clientID := utils.GenerateClientID()
 	
@@ -311,7 +350,10 @@ func UpdateUser(c *gin.Context) {
 // @Router /users/{id} [delete]
 func DeleteUser(c *gin.Context) {
 	userID := c.Param("id")
-	database.DB.Exec(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, userID)
+	if _, err := database.DB.Exec(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to delete user"})
+		return
+	}
 	c.JSON(http.StatusOK, models.SuccessResponse{Message: "User deleted successfully"})
 }
 
@@ -329,18 +371,32 @@ func DeleteUser(c *gin.Context) {
 func UpdatePassword(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	var req models.PasswordUpdateRequest
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "Invalid request data"})
+		return
+	}
 
 	var currentPasswordHash string
-	database.DB.QueryRow(`SELECT password FROM users WHERE id = $1`, userID).Scan(&currentPasswordHash)
+	if err := database.DB.QueryRow(`SELECT password FROM users WHERE id = $1`, userID).Scan(&currentPasswordHash); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to get current password"})
+		return
+	}
 
 	if !utils.CheckPasswordHash(req.OldPassword, currentPasswordHash) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "Current password is incorrect"})
 		return
 	}
 
-	newPasswordHash, _ := utils.HashPassword(req.NewPassword)
-	database.DB.Exec(`UPDATE users SET password = $1 WHERE id = $2`, newPasswordHash, userID)
+	newPasswordHash, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to hash new password"})
+		return
+	}
+	
+	if _, err := database.DB.Exec(`UPDATE users SET password = $1 WHERE id = $2`, newPasswordHash, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "Failed to update password"})
+		return
+	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse{Message: "Password updated successfully"})
 }
