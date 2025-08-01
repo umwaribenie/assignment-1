@@ -1,11 +1,11 @@
 package main
 
 import (
-	"log"
 	"generalusermanagement/config"
 	"generalusermanagement/database"
 	"generalusermanagement/routes"
-	_ "generalusermanagement/docs" // This line is important for go-swagger
+	"log"
+	"os"
 )
 
 // @title User Management API
@@ -29,12 +29,24 @@ import (
 // @description Type "Bearer" followed by a space and JWT token.
 
 func main() {
+	// Load configuration
 	config.LoadConfig()
-	database.InitDB()
-	defer database.CloseDB()
 
+	// Check if we should skip database for demo
+	if os.Getenv("SKIP_DB") != "true" {
+		// Initialize database
+		database.InitDB()
+		defer database.CloseDB()
+	} else {
+		log.Println("⚠️ Running in DEMO mode - Database connections skipped")
+	}
+
+	// Setup routes
 	r := routes.SetupRoutes()
-	
-	log.Printf("Server starting on port %s", config.AppConfig.Port)
-	log.Fatal(r.Run(":" + config.AppConfig.Port))
+
+	// Start server
+	log.Printf("🚀 Server starting on %s:%s", config.AppConfig.Host, config.AppConfig.Port)
+	if err := r.Run(":" + config.AppConfig.Port); err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
 }

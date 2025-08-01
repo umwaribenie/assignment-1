@@ -9,47 +9,86 @@ import (
 )
 
 type Config struct {
-	DBHost         string
-	DBPort         string
-	DBUser         string
-	DBPassword     string
-	DBName         string
-	DBSSLMode      string
+	// Database Configuration
+	DBHost              string
+	DBPort              string
+	DBUser              string
+	DBPassword          string
+	DBName              string
+	DBSSLMode           string
+	DBMaxOpenConns      int
+	DBMaxIdleConns      int
+	DBConnMaxLifetime   int
+	DBConnMaxIdleTime   int
+
+	// JWT Configuration
 	JWTSecret      string
 	JWTExpiryHours int
-	ServerPort     string
-	ServerHost     string
-	Port           string  // Alias for ServerPort
+
+	// Server Configuration
+	Port string
+	Host string
+
+	// File Upload Configuration
 	UploadPath     string
 	MaxFileSize    int64
-	Environment    string
+
+	// Environment
+	Environment string
+
+	// Email Configuration
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 var AppConfig *Config
 
 func LoadConfig() {
-	err := godotenv.Load()
-	if err != nil {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	port := getEnv("SERVER_PORT", "8082")
 	AppConfig = &Config{
-		DBHost:         getEnv("DB_HOST", "localhost"),
-		DBPort:         getEnv("DB_PORT", "5432"),
-		DBUser:         getEnv("DB_USER", "postgres"),
-		DBPassword:     getEnv("DB_PASSWORD", ""),
-		DBName:         getEnv("DB_NAME", "generalusermanagement"),
-		DBSSLMode:      getEnv("DB_SSL_MODE", "disable"),
-		JWTSecret:      getEnv("JWT_SECRET", "default_secret_change_in_production"),
+		// Database Configuration
+		DBHost:              getEnv("DB_HOST", "localhost"),
+		DBPort:              getEnv("DB_PORT", "5432"),
+		DBUser:              getEnv("DB_USER", "postgres"),
+		DBPassword:          getEnv("DB_PASSWORD", ""),
+		DBName:              getEnv("DB_NAME", "generalusermanagement"),
+		DBSSLMode:           getEnv("DB_SSL_MODE", "disable"),
+		DBMaxOpenConns:      getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
+		DBMaxIdleConns:      getEnvAsInt("DB_MAX_IDLE_CONNS", 25),
+		DBConnMaxLifetime:   getEnvAsInt("DB_CONN_MAX_LIFETIME", 5),
+		DBConnMaxIdleTime:   getEnvAsInt("DB_CONN_MAX_IDLE_TIME", 5),
+
+		// JWT Configuration
+		JWTSecret:      getEnv("JWT_SECRET", "your_super_secret_jwt_key_here_make_it_long_and_random"),
 		JWTExpiryHours: getEnvAsInt("JWT_EXPIRY_HOURS", 24),
-		ServerPort:     port,
-		ServerHost:     getEnv("SERVER_HOST", "localhost"),
-		Port:           port,  // Set the same value for both
+
+		// Server Configuration
+		Port: getEnv("SERVER_PORT", "8082"),
+		Host: getEnv("SERVER_HOST", "localhost"),
+
+		// File Upload Configuration
 		UploadPath:     getEnv("UPLOAD_PATH", "./uploads"),
 		MaxFileSize:    getEnvAsInt64("MAX_FILE_SIZE", 5242880), // 5MB
-		Environment:    getEnv("ENV", "development"),
+
+		// Environment
+		Environment: getEnv("ENV", "development"),
+
+		// Email Configuration
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     getEnvAsInt("SMTP_PORT", 587),
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
 	}
+
+	log.Println("Configuration loaded successfully")
 }
 
 func getEnv(key, defaultValue string) string {
@@ -61,8 +100,8 @@ func getEnv(key, defaultValue string) string {
 
 func getEnvAsInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.Atoi(value); err == nil {
-			return intVal
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
 		}
 	}
 	return defaultValue
@@ -70,8 +109,8 @@ func getEnvAsInt(key string, defaultValue int) int {
 
 func getEnvAsInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intVal
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return intValue
 		}
 	}
 	return defaultValue

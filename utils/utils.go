@@ -2,237 +2,221 @@ package utils
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
-	"generalusermanagement/config"
-	"generalusermanagement/models"
 	"math/big"
+	"net/smtp"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
+	"generalusermanagement/config"
+	"generalusermanagement/models"
 )
 
-// HashPassword hashes a password using bcrypt
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	return string(bytes), err
-}
-
-// CheckPasswordHash checks if a password matches its hash
-func CheckPasswordHash(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-
-// Claims represents the JWT claims
-type Claims struct {
-	UserID   string           `json:"user_id"`
-	Email    string           `json:"email"`
-	Role     models.UserRole  `json:"role"`
-	Username string           `json:"username"`
-	ClientID string           `json:"client_id"`
-	jwt.RegisteredClaims
-}
-
-// GenerateJWT generates a JWT token for a user
-func GenerateJWT(user models.User) (string, time.Time, error) {
-	expirationTime := time.Now().Add(time.Duration(config.AppConfig.JWTExpiryHours) * time.Hour)
+// Email related functions
+func SendEmail(to, subject, body string) error {
+	cfg := config.AppConfig
 	
-	claims := &Claims{
-		UserID:   user.ID.String(),
-		Email:    user.Email,
-		Role:     user.Role,
-		Username: user.Username,
-		ClientID: user.ClientID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "generalusermanagement",
-			Subject:   user.ID.String(),
-			ID:        uuid.New().String(),
-		},
+	if cfg.SMTPUser == "" || cfg.SMTPPassword == "" {
+		return fmt.Errorf("SMTP credentials not configured")
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(config.AppConfig.JWTSecret))
+	auth := smtp.PlainAuth("", cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPHost)
 	
-	return tokenString, expirationTime, err
+	msg := []byte(fmt.Sprintf("To: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s", to, subject, body))
+	
+	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
+	return smtp.SendMail(addr, auth, cfg.SMTPFrom, []string{to}, msg)
 }
 
-// ValidateJWT validates a JWT token and returns the claims
-func ValidateJWT(tokenString string) (*Claims, error) {
-	claims := &Claims{}
-	
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(config.AppConfig.JWTSecret), nil
-	})
 
-	if err != nil {
-		return nil, err
-	}
 
-	if !token.Valid {
-		return nil, errors.New("invalid token")
-	}
-
-	return claims, nil
-}
-
-// ExtractTokenFromHeader extracts JWT token from Authorization header
-func ExtractTokenFromHeader(authHeader string) (string, error) {
-	if authHeader == "" {
-		return "", errors.New("authorization header is required")
-	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return "", errors.New("authorization header format must be Bearer {token}")
-	}
-
-	return parts[1], nil
-}
-
-// GenerateOTP generates a random 6-digit OTP
-func GenerateOTP() (string, error) {
-	max := big.NewInt(1000000)
-	n, err := rand.Int(rand.Reader, max)
-	if err != nil {
-		return "", err
-	}
-	
-	return fmt.Sprintf("%06d", n.Int64()), nil
-}
-
-// GenerateClientID generates a unique client ID
-func GenerateClientID() string {
-	return fmt.Sprintf("USR_%d_%s", time.Now().Unix(), uuid.New().String()[:8])
-}
-
-// GenerateSlug generates a URL-friendly slug from a string
-func GenerateSlug(text string) string {
-	// Convert to lowercase
-	slug := strings.ToLower(text)
-	
-	// Replace spaces and special characters with hyphens
-	reg := regexp.MustCompile(`[^a-z0-9]+`)
-	slug = reg.ReplaceAllString(slug, "-")
-	
-	// Remove leading and trailing hyphens
-	slug = strings.Trim(slug, "-")
-	
-	// If slug is empty, generate a random one
-	if slug == "" {
-		slug = fmt.Sprintf("user-%s", uuid.New().String()[:8])
-	}
-	
-	return slug
-}
-
-// GenerateUniqueSlug generates a unique slug by appending a random string if needed
-func GenerateUniqueSlug(baseText string, userID string) string {
-	baseSlug := GenerateSlug(baseText)
-	
-	// Append first 8 characters of user ID to ensure uniqueness
-	if userID != "" {
-		baseSlug = fmt.Sprintf("%s-%s", baseSlug, userID[:8])
-	} else {
-		baseSlug = fmt.Sprintf("%s-%s", baseSlug, uuid.New().String()[:8])
-	}
-	
-	return baseSlug
-}
-
-// GenerateReferralCode generates a unique referral code
-func GenerateReferralCode() (string, error) {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const length = 8
-	
-	result := make([]byte, length)
-	for i := range result {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+// String utility functions
+func GenerateRandomString(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		if err != nil {
 			return "", err
 		}
-		result[i] = charset[num.Int64()]
+		b[i] = charset[randomIndex.Int64()]
 	}
-	
-	return string(result), nil
+	return string(b), nil
 }
 
-// ValidateRole checks if a role is valid
-func ValidateRole(role models.UserRole) bool {
-	validRoles := []models.UserRole{
-		models.RoleUser,
-		models.RoleAdmin,
-		models.RoleSuperAdmin,
-		models.RoleTrainer,
-		models.RoleInstructor,
-		models.RoleFrontdesk,
-		models.RoleFinance,
-		models.RoleSeler,
-		models.RoleMember,
+// Validation functions
+func IsValidEmail(email string) bool {
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return emailRegex.MatchString(email)
+}
+
+func IsValidPhoneNumber(phone string) bool {
+	phoneRegex := regexp.MustCompile(`^\+?[1-9]\d{1,14}$`)
+	return phoneRegex.MatchString(phone)
+}
+
+func IsValidPassword(password string) bool {
+	if len(password) < 6 {
+		return false
 	}
 	
-	for _, validRole := range validRoles {
-		if role == validRole {
+	hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(password)
+	hasLower := regexp.MustCompile(`[a-z]`).MatchString(password)
+	hasNumber := regexp.MustCompile(`[0-9]`).MatchString(password)
+	
+	return hasUpper && hasLower && hasNumber
+}
+
+// Formatting functions
+func FormatPhoneNumber(phone string) string {
+	// Remove all non-digit characters except +
+	re := regexp.MustCompile(`[^\d+]`)
+	cleaned := re.ReplaceAllString(phone, "")
+	
+	// If it doesn't start with +, add country code (assuming +1 for US)
+	if !strings.HasPrefix(cleaned, "+") {
+		cleaned = "+1" + cleaned
+	}
+	
+	return cleaned
+}
+
+func SanitizeString(input string) string {
+	// Remove potentially dangerous characters
+	re := regexp.MustCompile(`[<>\"'&]`)
+	return re.ReplaceAllString(strings.TrimSpace(input), "")
+}
+
+// Time utilities
+func GetCurrentTimestamp() time.Time {
+	return time.Now().UTC()
+}
+
+func FormatTimestamp(t time.Time) string {
+	return t.Format("2006-01-02 15:04:05")
+}
+
+// File utilities
+func GetFileExtension(filename string) string {
+	parts := strings.Split(filename, ".")
+	if len(parts) > 1 {
+		return strings.ToLower(parts[len(parts)-1])
+	}
+	return ""
+}
+
+func IsValidImageExtension(ext string) bool {
+	validExts := []string{"jpg", "jpeg", "png", "gif", "webp"}
+	ext = strings.ToLower(ext)
+	for _, validExt := range validExts {
+		if ext == validExt {
 			return true
 		}
 	}
 	return false
 }
 
-// ValidateSubscriptionStatus checks if a subscription status is valid
-func ValidateSubscriptionStatus(status models.SubscriptionStatus) bool {
-	validStatuses := []models.SubscriptionStatus{
-		models.SubscriptionActive,
-		models.SubscriptionInactive,
-		models.SubscriptionExpired,
-		models.SubscriptionOnHold,
-		models.SubscriptionPaused,
-		models.SubscriptionCanceled,
+// User-related utilities
+func GetUserDisplayName(user models.User) string {
+	if user.FirstName != "" && user.LastName != "" {
+		return fmt.Sprintf("%s %s", user.FirstName, user.LastName)
+	}
+	if user.FirstName != "" {
+		return user.FirstName
+	}
+	return user.Username
+}
+
+// Database utilities
+func BuildUpdateQuery(tableName string, updates map[string]interface{}, whereClause string) (string, []interface{}) {
+	if len(updates) == 0 {
+		return "", nil
 	}
 	
-	for _, validStatus := range validStatuses {
-		if status == validStatus {
-			return true
+	setParts := make([]string, 0, len(updates))
+	args := make([]interface{}, 0, len(updates))
+	argIndex := 1
+	
+	for column, value := range updates {
+		setParts = append(setParts, fmt.Sprintf("%s = $%d", column, argIndex))
+		args = append(args, value)
+		argIndex++
+	}
+	
+	query := fmt.Sprintf("UPDATE %s SET %s, updated_at = CURRENT_TIMESTAMP WHERE %s", 
+		tableName, strings.Join(setParts, ", "), whereClause)
+	
+	return query, args
+}
+
+// Error handling utilities
+func HandleDatabaseError(err error) error {
+	if err == nil {
+		return nil
+	}
+	
+	errStr := err.Error()
+	
+	// Check for common PostgreSQL errors
+	if strings.Contains(errStr, "duplicate key value violates unique constraint") {
+		if strings.Contains(errStr, "email") {
+			return fmt.Errorf("email already exists")
 		}
+		if strings.Contains(errStr, "username") {
+			return fmt.Errorf("username already exists")
+		}
+		if strings.Contains(errStr, "client_id") {
+			return fmt.Errorf("client ID already exists")
+		}
+		return fmt.Errorf("duplicate entry")
 	}
-	return false
-}
-
-// ValidateSelerType checks if a seller type is valid
-func ValidateSelerType(selerType models.SelerType) bool {
-	return selerType == models.SelerTypeSeler || selerType == models.SelerTypePromoter
-}
-
-// IsAdminRole checks if a role has admin privileges
-func IsAdminRole(role models.UserRole) bool {
-	return role == models.RoleAdmin || role == models.RoleSuperAdmin
-}
-
-// CanManageUsers checks if a role can manage other users
-func CanManageUsers(role models.UserRole) bool {
-	return role == models.RoleAdmin || role == models.RoleSuperAdmin || role == models.RoleFrontdesk
-}
-
-// GenerateUsername generates a username from first and last name
-func GenerateUsername(firstName, lastName string) string {
-	username := strings.ToLower(fmt.Sprintf("%s.%s", firstName, lastName))
 	
-	// Remove special characters
-	reg := regexp.MustCompile(`[^a-z0-9.]`)
-	username = reg.ReplaceAllString(username, "")
+	if strings.Contains(errStr, "no rows in result set") {
+		return fmt.Errorf("record not found")
+	}
 	
-	// Add random suffix to ensure uniqueness
-	username = fmt.Sprintf("%s.%s", username, uuid.New().String()[:4])
+	return err
+}
+
+// Pagination utilities
+func CalculateOffset(page, pageSize int) int {
+	if page < 1 {
+		page = 1
+	}
+	return (page - 1) * pageSize
+}
+
+func CalculateTotalPages(total int64, pageSize int) int {
+	if pageSize <= 0 {
+		return 1
+	}
+	return int((total + int64(pageSize) - 1) / int64(pageSize))
+}
+
+// Response utilities
+func BuildSuccessResponse(message string, data interface{}) map[string]interface{} {
+	response := map[string]interface{}{
+		"success": true,
+		"message": message,
+	}
 	
-	return username
+	if data != nil {
+		response["data"] = data
+	}
+	
+	return response
+}
+
+func BuildErrorResponse(message string, err error) map[string]interface{} {
+	response := map[string]interface{}{
+		"success": false,
+		"message": message,
+	}
+	
+	if err != nil {
+		response["error"] = err.Error()
+	}
+	
+	return response
 }
