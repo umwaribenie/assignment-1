@@ -11,8 +11,6 @@ import (
 
 	"generalusermanagement/config"
 	"generalusermanagement/models"
-
-	"github.com/google/uuid"
 )
 
 // Email related functions
@@ -31,49 +29,7 @@ func SendEmail(to, subject, body string) error {
 	return smtp.SendMail(addr, auth, cfg.SMTPFrom, []string{to}, msg)
 }
 
-// OTP Email function
-func SendOTPEmail(email, otp, purpose string) error {
-	var subject, body string
-	
-	switch purpose {
-	case "password_reset":
-		subject = "Password Reset OTP"
-		body = fmt.Sprintf(`
-			<html>
-			<body>
-				<h2>Password Reset Request</h2>
-				<p>Your OTP for password reset is: <strong>%s</strong></p>
-				<p>This OTP will expire in 15 minutes.</p>
-				<p>If you didn't request this, please ignore this email.</p>
-			</body>
-			</html>
-		`, otp)
-	case "login_verification":
-		subject = "Login Verification OTP"
-		body = fmt.Sprintf(`
-			<html>
-			<body>
-				<h2>Login Verification</h2>
-				<p>Your OTP for login verification is: <strong>%s</strong></p>
-				<p>This OTP will expire in 10 minutes.</p>
-			</body>
-			</html>
-		`, otp)
-	default:
-		subject = "OTP Verification"
-		body = fmt.Sprintf(`
-			<html>
-			<body>
-				<h2>OTP Verification</h2>
-				<p>Your OTP is: <strong>%s</strong></p>
-				<p>This OTP will expire in 15 minutes.</p>
-			</body>
-			</html>
-		`, otp)
-	}
-	
-	return SendEmail(email, subject, body)
-}
+
 
 // String utility functions
 func GenerateRandomString(length int) (string, error) {

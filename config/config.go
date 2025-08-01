@@ -29,6 +29,10 @@ type Config struct {
 	Port string
 	Host string
 
+	// File Upload Configuration
+	UploadPath     string
+	MaxFileSize    int64
+
 	// Environment
 	Environment string
 
@@ -69,6 +73,10 @@ func LoadConfig() {
 		Port: getEnv("SERVER_PORT", "8082"),
 		Host: getEnv("SERVER_HOST", "localhost"),
 
+		// File Upload Configuration
+		UploadPath:     getEnv("UPLOAD_PATH", "./uploads"),
+		MaxFileSize:    getEnvAsInt64("MAX_FILE_SIZE", 5242880), // 5MB
+
 		// Environment
 		Environment: getEnv("ENV", "development"),
 
@@ -93,6 +101,15 @@ func getEnv(key, defaultValue string) string {
 func getEnvAsInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return intValue
 		}
 	}
