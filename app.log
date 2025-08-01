@@ -1,0 +1,7 @@
+2025/08/01 10:22:03 Configuration loaded successfully
+2025/08/01 10:22:03 Successfully connected to database
+2025/08/01 10:22:03 All tables created successfully
+2025/08/01 10:22:03 Database migrations completed
+2025/08/01 10:22:03 🚀 Server starting on localhost:8082
+2025/08/01 10:22:03 Failed to start server:listen tcp :8082: bind: address already in use
+exit status 1
