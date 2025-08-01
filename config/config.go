@@ -38,7 +38,7 @@ type Config struct {
 
 	// Email Configuration
 	SMTPHost     string
-	SMTPPort     string
+	SMTPPort     int
 	SMTPUser     string
 	SMTPPassword string
 	SMTPFrom     string
@@ -82,7 +82,7 @@ func LoadConfig() {
 
 		// Email Configuration
 		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPPort:     getEnvAsInt("SMTP_PORT", 587),
 		SMTPUser:     getEnv("SMTP_USER", ""),
 		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
