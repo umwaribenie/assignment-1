@@ -1,557 +1,564 @@
-# Step-by-Step Microservices Guide
+# Step-by-Step Guide: Monolithic to Microservices Transformation
 
-## 🎯 What You'll Learn
+This guide walks you through transforming your existing monolithic Go application into a microservices architecture.
 
-This guide will walk you through:
-1. Understanding microservices architecture
-2. Setting up Redis caching
-3. Implementing Kafka event-driven communication
-4. Running the complete system
-5. Testing the functionality
+## 🎯 Overview
 
-## 📚 Understanding Microservices
+We'll break down your monolithic application into two main microservices:
+1. **User Service** - Handles user management with Redis caching
+2. **Notification Service** - Handles notifications with Kafka event processing
 
-### What are Microservices?
+## 📋 Prerequisites
 
-Microservices is an architectural style where an application is built as a collection of small, independent services. Each service:
-- **Has its own database** (Database per Service pattern)
-- **Can be developed, deployed, and scaled independently**
-- **Communicates via APIs or message queues**
-- **Has a single responsibility**
+- Go 1.24+
+- Docker and Docker Compose
+- Basic understanding of Go, Redis, Kafka, and PostgreSQL
 
-### Why Microservices?
+## 🚀 Step 1: Project Structure Setup
 
-**Benefits:**
-- ✅ **Scalability**: Scale services independently
-- ✅ **Fault Isolation**: One service failure doesn't affect others
-- ✅ **Technology Diversity**: Use different tech stacks per service
-- ✅ **Team Autonomy**: Teams can work independently
-- ✅ **Deployment Flexibility**: Deploy services independently
-
-**Challenges:**
-- ❌ **Complexity**: More moving parts to manage
-- ❌ **Network Latency**: Service-to-service communication overhead
-- ❌ **Data Consistency**: Distributed data management
-- ❌ **Testing**: More complex integration testing
-
-## 🏗️ Our Architecture
-
-### Services Overview
-
-1. **User Service (Port 8081)**
-   - Manages user data (CRUD operations)
-   - Uses Redis for caching
-   - Publishes events to Kafka
-
-2. **Notification Service (Port 8082)**
-   - Handles notifications (email, SMS, push)
-   - Consumes events from Kafka
-   - Manages notification lifecycle
-
-### Communication Patterns
-
-1. **Synchronous**: HTTP/REST APIs for direct communication
-2. **Asynchronous**: Kafka for event-driven communication
-3. **Caching**: Redis for performance optimization
-
-## 🚀 Step 1: Understanding the Code Structure
-
-### User Service Structure
-```
-user-service/
-├── cmd/main.go              # Application entry point
-├── internal/
-│   ├── handlers/            # HTTP request handlers
-│   ├── models/              # Data models
-│   ├── repository/          # Database operations
-│   └── service/             # Business logic
-├── pkg/
-│   ├── kafka/              # Kafka producer
-│   └── utils/              # Cache utilities
-└── go.mod                  # Dependencies
+### 1.1 Create Directory Structure
+```bash
+mkdir -p microservices/{user-service,notification-service,shared}
+mkdir -p microservices/user-service/{cmd,internal/{handlers,models,repository,service,middleware,cache},pkg/{kafka,utils}}
+mkdir -p microservices/notification-service/{cmd,internal/{handlers,models,repository,service,kafka},pkg/utils}
+mkdir -p microservices/shared/{models,utils,kafka}
 ```
 
-### Notification Service Structure
-```
-notification-service/
-├── cmd/main.go              # Application entry point
-├── internal/
-│   ├── handlers/            # HTTP request handlers
-│   ├── models/              # Data models
-│   ├── repository/          # Database operations
-│   ├── service/             # Business logic
-│   └── kafka/              # Kafka consumer
-└── go.mod                  # Dependencies
+### 1.2 Initialize Go Modules
+```bash
+cd microservices/user-service
+go mod init user-service
+
+cd ../notification-service
+go mod init notification-service
 ```
 
-## 🔧 Step 2: Setting Up the Environment
-
-### Prerequisites Installation
-
-1. **Install Docker and Docker Compose:**
-   ```bash
-   # Ubuntu/Debian
-   sudo apt update
-   sudo apt install docker.io docker-compose
-   
-   # macOS
-   brew install docker docker-compose
-   
-   # Windows
-   # Download Docker Desktop from https://www.docker.com/products/docker-desktop
-   ```
-
-2. **Install Go:**
-   ```bash
-   # Ubuntu/Debian
-   sudo apt install golang-go
-   
-   # macOS
-   brew install go
-   
-   # Windows
-   # Download from https://golang.org/dl/
-   ```
-
-3. **Verify installations:**
-   ```bash
-   docker --version
-   docker-compose --version
-   go version
-   ```
-
-## 🐳 Step 3: Running with Docker Compose
-
-### Quick Start (Recommended)
-
-1. **Navigate to the microservices directory:**
-   ```bash
-   cd microservices
-   ```
-
-2. **Start all services:**
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Check service status:**
-   ```bash
-   docker-compose ps
-   ```
-
-4. **View logs:**
-   ```bash
-   # View all logs
-   docker-compose logs -f
-   
-   # View specific service logs
-   docker-compose logs -f user-service
-   docker-compose logs -f notification-service
-   ```
-
-### What's Running?
-
-After running `docker-compose up -d`, you'll have:
-
-| Service | Port | Description |
-|---------|------|-------------|
-| PostgreSQL | 5432 | Database |
-| Redis | 6379 | Cache |
-| Kafka | 9092 | Message broker |
-| Zookeeper | 2181 | Kafka coordination |
-| User Service | 8081 | User management API |
-| Notification Service | 8082 | Notification API |
-| Kafka UI | 8080 | Kafka monitoring |
-| Redis Commander | 8083 | Redis monitoring |
-
-## 🧪 Step 4: Testing the System
-
-### Test 1: Health Checks
-
-1. **Check User Service:**
-   ```bash
-   curl http://localhost:8081/api/v1/health
-   ```
-   Expected response:
-   ```json
-   {
-     "status": "healthy",
-     "service": "user-service",
-     "timestamp": 1234567890
-   }
-   ```
-
-2. **Check Notification Service:**
-   ```bash
-   curl http://localhost:8082/api/v1/health
-   ```
-
-### Test 2: Create a User
-
-1. **Create a user:**
-   ```bash
-   curl -X POST http://localhost:8081/api/v1/users \
-     -H "Content-Type: application/json" \
-     -d '{
-       "client_id": "client123",
-       "email": "john.doe@example.com",
-       "first_name": "John",
-       "last_name": "Doe",
-       "password": "password123",
-       "phone": "+1234567890",
-       "username": "johndoe",
-       "role": "user"
-     }'
-   ```
-
-2. **Expected response:**
-   ```json
-   {
-     "message": "User created successfully",
-     "data": {
-       "id": "uuid-here",
-       "email": "john.doe@example.com",
-       "first_name": "John",
-       "last_name": "Doe",
-       "role": "user",
-       "status": "active"
-     }
-   }
-   ```
-
-### Test 3: Check Notifications
-
-1. **Get all notifications:**
-   ```bash
-   curl "http://localhost:8082/api/v1/notifications"
-   ```
-
-2. **You should see a welcome notification created automatically!**
-
-### Test 4: Update User Status
-
-1. **Update user status:**
-   ```bash
-   curl -X PUT http://localhost:8081/api/v1/users/{user-id} \
-     -H "Content-Type: application/json" \
-     -d '{
-       "status": "suspended"
-     }'
-   ```
-
-2. **Check notifications again:**
-   ```bash
-   curl "http://localhost:8082/api/v1/notifications"
-   ```
-
-3. **You should see a status change notification!**
-
-## 🔍 Step 5: Understanding the Event Flow
-
-### Event-Driven Architecture
-
-1. **User Creation Flow:**
-   ```
-   User Service → Creates User → Publishes "user.created" → Kafka → Notification Service → Creates Welcome Email
-   ```
-
-2. **User Update Flow:**
-   ```
-   User Service → Updates User → Publishes "user.updated" → Kafka → Notification Service → Creates Update Notification
-   ```
-
-3. **Status Change Flow:**
-   ```
-   User Service → Changes Status → Publishes "user.status_changed" → Kafka → Notification Service → Creates Status Notification
-   ```
-
-### Monitoring the Events
-
-1. **Kafka UI (http://localhost:8080):**
-   - View topics and messages
-   - Monitor consumer groups
-   - Check message details
-
-2. **Redis Commander (http://localhost:8083):**
-   - View cached data
-   - Monitor Redis performance
-   - Check cache keys
-
-## 📊 Step 6: Understanding Caching
-
-### Redis Caching Strategy
-
-1. **User Cache Keys:**
-   - `user:{user-id}` - Individual user data
-   - `users:list:{filter}` - User list with filters
-   - `users:count` - Total user count
-
-2. **Cache Invalidation:**
-   - When user is created/updated/deleted
-   - Cache is automatically invalidated
-   - Ensures data consistency
-
-3. **Cache Benefits:**
-   - Faster response times
-   - Reduced database load
-   - Better user experience
-
-## 🔧 Step 7: Running Locally (Development)
-
-### Prerequisites
-
-1. **Start infrastructure only:**
-   ```bash
-   docker-compose up -d postgres redis kafka zookeeper
-   ```
-
-2. **Set up environment files:**
-   ```bash
-   cp user-service/.env.example user-service/.env
-   cp notification-service/.env.example notification-service/.env
-   ```
-
-### Running User Service
-
-1. **Navigate to user service:**
-   ```bash
-   cd user-service
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   go mod tidy
-   ```
-
-3. **Run the service:**
-   ```bash
-   go run cmd/main.go
-   ```
-
-### Running Notification Service
-
-1. **Open new terminal and navigate:**
-   ```bash
-   cd notification-service
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   go mod tidy
-   ```
-
-3. **Run the service:**
-   ```bash
-   go run cmd/main.go
-   ```
-
-## 🐛 Step 8: Debugging and Troubleshooting
-
-### Common Issues
-
-1. **Kafka Connection Issues:**
-   ```bash
-   # Check if Kafka is running
-   docker-compose ps kafka
-   
-   # Check Kafka logs
-   docker-compose logs kafka
-   
-   # Restart Kafka
-   docker-compose restart kafka
-   ```
-
-2. **Database Connection Issues:**
-   ```bash
-   # Check if PostgreSQL is running
-   docker-compose ps postgres
-   
-   # Check database logs
-   docker-compose logs postgres
-   
-   # Connect to database
-   docker-compose exec postgres psql -U postgres -d user_service
-   ```
-
-3. **Redis Connection Issues:**
-   ```bash
-   # Check if Redis is running
-   docker-compose ps redis
-   
-   # Check Redis logs
-   docker-compose logs redis
-   
-   # Connect to Redis
-   docker-compose exec redis redis-cli
-   ```
-
-### Log Analysis
-
-1. **View all logs:**
-   ```bash
-   docker-compose logs -f
-   ```
-
-2. **View specific service logs:**
-   ```bash
-   docker-compose logs -f user-service
-   docker-compose logs -f notification-service
-   ```
-
-3. **Search logs:**
-   ```bash
-   docker-compose logs | grep "error"
-   docker-compose logs | grep "user.created"
-   ```
-
-## 📈 Step 9: Performance Monitoring
-
-### Key Metrics to Monitor
-
-1. **Response Times:**
-   - API response times
-   - Database query times
-   - Cache hit rates
-
-2. **Throughput:**
-   - Requests per second
-   - Messages per second (Kafka)
-   - Database connections
-
-3. **Error Rates:**
-   - HTTP error rates
-   - Kafka consumer lag
-   - Database connection errors
-
-### Monitoring Tools
-
-1. **Built-in Health Checks:**
-   ```bash
-   curl http://localhost:8081/api/v1/health
-   curl http://localhost:8082/api/v1/health
-   ```
-
-2. **Kafka UI:** http://localhost:8080
-3. **Redis Commander:** http://localhost:8083
-
-## 🚀 Step 10: Production Considerations
-
-### Security
-
-1. **Environment Variables:**
-   - Use `.env` files for development only
-   - Use Kubernetes secrets or AWS Secrets Manager in production
-   - Never commit secrets to version control
-
-2. **Network Security:**
-   - Use HTTPS in production
-   - Implement proper authentication/authorization
-   - Use VPN or private networks
-
-3. **Database Security:**
-   - Use strong passwords
-   - Enable SSL connections
-   - Regular security updates
-
-### Scaling
-
-1. **Horizontal Scaling:**
-   - Run multiple instances of each service
-   - Use load balancers
-   - Implement auto-scaling
-
-2. **Database Scaling:**
-   - Read replicas for read-heavy workloads
-   - Database sharding for large datasets
-   - Connection pooling
-
-3. **Kafka Scaling:**
-   - Multiple Kafka brokers
-   - Topic partitioning
-   - Consumer group scaling
-
-### Monitoring and Alerting
-
-1. **Logging:**
-   - Centralized logging (ELK stack)
-   - Structured logging
-   - Log retention policies
-
-2. **Metrics:**
-   - Prometheus for metrics collection
-   - Grafana for visualization
-   - Custom business metrics
-
-3. **Alerting:**
-   - Service health alerts
-   - Performance degradation alerts
-   - Error rate alerts
-
-## 🎓 Next Steps
-
-### Learning Path
-
-1. **Deepen Your Knowledge:**
-   - Read "Building Microservices" by Sam Newman
-   - Study event-driven architecture patterns
-   - Learn about distributed systems
-
-2. **Advanced Topics:**
-   - Service mesh (Istio, Linkerd)
-   - API Gateway patterns
-   - Circuit breaker patterns
-   - Saga pattern for distributed transactions
-
-3. **Tools to Explore:**
-   - Kubernetes for orchestration
-   - Prometheus for monitoring
-   - Jaeger for distributed tracing
-   - Elasticsearch for logging
-
-### Practice Projects
-
-1. **Add Authentication Service:**
-   - JWT token management
-   - OAuth2 integration
-   - Role-based access control
-
-2. **Add Payment Service:**
-   - Payment processing
-   - Transaction management
-   - Integration with payment gateways
-
-3. **Add Analytics Service:**
-   - User behavior tracking
-   - Business metrics
-   - Data visualization
-
-## 📚 Additional Resources
-
-### YouTube Tutorials
-- "Microservices with Go" by Tech With Tim
-- "Building Microservices with Go" by Golang Dojo
-- "Kafka Tutorial for Beginners" by Confluent
-- "Redis Tutorial for Beginners" by Redis University
-
-### Documentation
+## 🔧 Step 2: Shared Components
+
+### 2.1 Shared Models (`shared/models/models.go`)
+Create common data structures used across services:
+
+```go
+package models
+
+import "time"
+
+type UserRole string
+const (
+    RoleUser  UserRole = "user"
+    RoleAdmin UserRole = "admin"
+)
+
+type UserStatus string
+const (
+    ActiveStatus   UserStatus = "active"
+    InactiveStatus UserStatus = "inactive"
+    DeletedStatus  UserStatus = "deleted"
+)
+
+type User struct {
+    ID             string     `json:"id"`
+    ClientID       string     `json:"clientId"`
+    Email          string     `json:"email"`
+    FirstName      string     `json:"firstName"`
+    LastName       string     `json:"lastName"`
+    Phone          string     `json:"phone"`
+    Username       string     `json:"username"`
+    Role           UserRole   `json:"role"`
+    Status         UserStatus `json:"status"`
+    CreatedAt      time.Time  `json:"createdAt"`
+    UpdatedAt      time.Time  `json:"updatedAt"`
+}
+```
+
+### 2.2 Shared Kafka Events (`shared/kafka/events.go`)
+Define event structures for inter-service communication:
+
+```go
+package kafka
+
+import (
+    "time"
+    "github.com/google/uuid"
+)
+
+type EventType string
+const (
+    EventUserCreated     EventType = "user.created"
+    EventUserUpdated     EventType = "user.updated"
+    EventUserStatusChanged EventType = "user.status_changed"
+    EventUserDeleted     EventType = "user.deleted"
+)
+
+type BaseEvent struct {
+    ID        string    `json:"id"`
+    Type      EventType `json:"type"`
+    Timestamp time.Time `json:"timestamp"`
+    Source    string    `json:"source"`
+}
+
+type UserCreatedEvent struct {
+    BaseEvent
+    Data struct {
+        UserID    string `json:"user_id"`
+        Email     string `json:"email"`
+        Username  string `json:"username"`
+        FirstName string `json:"first_name"`
+        LastName  string `json:"last_name"`
+        Phone     string `json:"phone"`
+    } `json:"data"`
+}
+```
+
+## 🏗️ Step 3: User Service Implementation
+
+### 3.1 Database Models (`user-service/internal/models/models.go`)
+```go
+package models
+
+import (
+    "time"
+    "gorm.io/gorm"
+    sharedModels "microservices/shared/models"
+)
+
+type User struct {
+    ID             string                `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()" json:"id"`
+    ClientID       string                `gorm:"unique" json:"clientId"`
+    Email          string                `gorm:"uniqueIndex" json:"email"`
+    FirstName      string                `json:"firstName"`
+    LastName       string                `json:"lastName"`
+    Password       string                `json:"-"`
+    Phone          string                `gorm:"unique" json:"phone"`
+    Username       string                `gorm:"uniqueIndex" json:"username"`
+    Slug           string                `gorm:"uniqueIndex" json:"slug"`
+    Role           sharedModels.UserRole `gorm:"type:varchar(50);default:'user'" json:"role"`
+    Status         sharedModels.UserStatus `gorm:"type:varchar(50);default:'active'" json:"status"`
+    CreatedAt      time.Time             `gorm:"autoCreateTime" json:"createdAt"`
+    UpdatedAt      time.Time             `gorm:"autoUpdateTime" json:"updatedAt"`
+    DeletedAt      gorm.DeletedAt        `gorm:"index" json:"-"`
+}
+```
+
+### 3.2 Repository Layer (`user-service/internal/repository/user_repository.go`)
+```go
+package repository
+
+import (
+    "context"
+    "time"
+    "microservices/user-service/internal/models"
+    "microservices/user-service/pkg/utils"
+    "gorm.io/gorm"
+)
+
+type UserRepository interface {
+    Create(ctx context.Context, user *models.User) error
+    GetByID(ctx context.Context, id string) (*models.User, error)
+    GetByEmail(ctx context.Context, email string) (*models.User, error)
+    Update(ctx context.Context, id string, user *models.User) error
+    Delete(ctx context.Context, id string) error
+    GetAll(ctx context.Context, filter models.UserFilter) ([]models.User, int64, error)
+}
+
+type userRepository struct {
+    db    *gorm.DB
+    cache *utils.CacheClient
+}
+
+func (r *userRepository) GetByID(ctx context.Context, id string) (*models.User, error) {
+    // Try cache first
+    cacheKey := utils.GenerateUserCacheKey(id)
+    var user models.User
+    
+    if err := r.cache.Get(ctx, cacheKey, &user); err == nil {
+        return &user, nil
+    }
+    
+    // Get from database
+    if err := r.db.First(&user, "id = ?", id).Error; err != nil {
+        return nil, err
+    }
+    
+    // Store in cache
+    r.cache.Set(ctx, cacheKey, user, 30*time.Minute)
+    return &user, nil
+}
+```
+
+### 3.3 Service Layer (`user-service/internal/service/user_service.go`)
+```go
+package service
+
+import (
+    "context"
+    "microservices/user-service/internal/models"
+    "microservices/user-service/internal/repository"
+    "microservices/user-service/pkg/kafka"
+    "golang.org/x/crypto/bcrypt"
+)
+
+type UserService interface {
+    CreateUser(ctx context.Context, req models.CreateUserRequest) (*models.UserResponse, error)
+    GetUserByID(ctx context.Context, id string) (*models.UserResponse, error)
+    UpdateUser(ctx context.Context, id string, req models.UpdateUserRequest) (*models.UserResponse, error)
+    DeleteUser(ctx context.Context, id string) error
+}
+
+type userService struct {
+    userRepo      repository.UserRepository
+    kafkaProducer *kafka.Producer
+}
+
+func (s *userService) CreateUser(ctx context.Context, req models.CreateUserRequest) (*models.UserResponse, error) {
+    // Hash password
+    hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Create user
+    user := &models.User{
+        ClientID:  req.ClientID,
+        Email:     req.Email,
+        FirstName: req.FirstName,
+        LastName:  req.LastName,
+        Password:  string(hashedPassword),
+        Phone:     req.Phone,
+        Username:  req.Username,
+        Role:      "user",
+        Status:    "active",
+    }
+    
+    if err := s.userRepo.Create(ctx, user); err != nil {
+        return nil, err
+    }
+    
+    // Publish event
+    s.kafkaProducer.PublishUserCreated(ctx, user.ID, user.Email, user.Username, user.FirstName, user.LastName, user.Phone)
+    
+    return s.toUserResponse(user), nil
+}
+```
+
+### 3.4 HTTP Handlers (`user-service/internal/handlers/user_handlers.go`)
+```go
+package handlers
+
+import (
+    "net/http"
+    "microservices/user-service/internal/models"
+    "microservices/user-service/internal/service"
+    "github.com/gin-gonic/gin"
+)
+
+type UserHandler struct {
+    userService service.UserService
+}
+
+func (h *UserHandler) CreateUser(c *gin.Context) {
+    var req models.CreateUserRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+        return
+    }
+    
+    user, err := h.userService.CreateUser(c.Request.Context(), req)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+        return
+    }
+    
+    c.JSON(http.StatusCreated, user)
+}
+```
+
+### 3.5 Main Application (`user-service/cmd/main.go`)
+```go
+package main
+
+import (
+    "log"
+    "microservices/user-service/internal/handlers"
+    "microservices/user-service/internal/repository"
+    "microservices/user-service/internal/service"
+    "microservices/user-service/pkg/kafka"
+    "microservices/user-service/pkg/utils"
+    "github.com/gin-gonic/gin"
+    "github.com/joho/godotenv"
+)
+
+func main() {
+    // Load environment variables
+    godotenv.Load()
+    
+    // Initialize dependencies
+    db := initDatabase()
+    cache := utils.NewCacheClient()
+    kafkaProducer := kafka.NewProducer()
+    
+    // Initialize layers
+    userRepo := repository.NewUserRepository(db, cache)
+    userService := service.NewUserService(userRepo, cache, kafkaProducer)
+    userHandler := handlers.NewUserHandler(userService)
+    
+    // Setup router
+    router := gin.Default()
+    setupRoutes(router, userHandler)
+    
+    // Start server
+    log.Fatal(router.Run(":8081"))
+}
+```
+
+## 📧 Step 4: Notification Service Implementation
+
+### 4.1 Database Models (`notification-service/internal/models/models.go`)
+```go
+package models
+
+import (
+    "time"
+    "gorm.io/gorm"
+)
+
+type Notification struct {
+    ID         string         `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()" json:"id"`
+    UserID     string         `json:"userId"`
+    Type       string         `json:"type"` // email, sms, push
+    Subject    string         `json:"subject"`
+    Message    string         `json:"message"`
+    Recipient  string         `json:"recipient"`
+    Status     string         `json:"status"` // pending, sent, failed
+    Template   string         `json:"template"`
+    Variables  map[string]interface{} `gorm:"type:jsonb" json:"variables"`
+    RetryCount int            `json:"retryCount"`
+    MaxRetries int            `json:"maxRetries"`
+    SentAt     *time.Time     `json:"sentAt"`
+    FailedAt   *time.Time     `json:"failedAt"`
+    ErrorMsg   string         `json:"errorMsg"`
+    CreatedAt  time.Time      `gorm:"autoCreateTime" json:"createdAt"`
+    UpdatedAt  time.Time      `gorm:"autoUpdateTime" json:"updatedAt"`
+    DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+```
+
+### 4.2 Kafka Consumer (`notification-service/internal/kafka/consumer.go`)
+```go
+package kafka
+
+import (
+    "context"
+    "encoding/json"
+    "log"
+    "microservices/shared/kafka"
+    "microservices/notification-service/internal/service"
+    "github.com/segmentio/kafka-go"
+)
+
+type Consumer struct {
+    reader *kafka.Reader
+    notificationService service.NotificationService
+}
+
+func (c *Consumer) Start(ctx context.Context) {
+    for {
+        message, err := c.reader.ReadMessage(ctx)
+        if err != nil {
+            log.Printf("Error reading message: %v", err)
+            continue
+        }
+        
+        c.handleMessage(ctx, message)
+    }
+}
+
+func (c *Consumer) handleMessage(ctx context.Context, message kafka.Message) {
+    var baseEvent kafka.BaseEvent
+    if err := json.Unmarshal(message.Value, &baseEvent); err != nil {
+        log.Printf("Error unmarshaling event: %v", err)
+        return
+    }
+    
+    switch baseEvent.Type {
+    case kafka.EventUserCreated:
+        c.handleUserCreated(ctx, message.Value)
+    case kafka.EventUserUpdated:
+        c.handleUserUpdated(ctx, message.Value)
+    case kafka.EventUserStatusChanged:
+        c.handleUserStatusChanged(ctx, message.Value)
+    }
+}
+
+func (c *Consumer) handleUserCreated(ctx context.Context, data []byte) {
+    var event kafka.UserCreatedEvent
+    if err := json.Unmarshal(data, &event); err != nil {
+        log.Printf("Error unmarshaling user created event: %v", err)
+        return
+    }
+    
+    // Create welcome notifications
+    c.notificationService.CreateWelcomeNotifications(ctx, event.Data.UserID, event.Data.Email, event.Data.Phone)
+}
+```
+
+## 🐳 Step 5: Docker Configuration
+
+### 5.1 User Service Dockerfile (`user-service/Dockerfile`)
+```dockerfile
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main cmd/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/main .
+EXPOSE 8081
+CMD ["./main"]
+```
+
+### 5.2 Docker Compose (`docker-compose.yml`)
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: user_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+
+  user-service:
+    build: ./user-service
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - REDIS_ADDR=redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=postgres
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres
+      - kafka
+
+volumes:
+  postgres_data:
+```
+
+## 🚀 Step 6: Testing the Implementation
+
+### 6.1 Start Services
+```bash
+cd microservices
+docker-compose up -d
+```
+
+### 6.2 Test User Creation
+```bash
+curl -X POST http://localhost:8081/api/v1/users/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "CLIENT001",
+    "email": "john.doe@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "password": "password123",
+    "phone": "+1234567890",
+    "username": "johndoe"
+  }'
+```
+
+### 6.3 Check Notifications
+```bash
+curl http://localhost:8082/api/v1/notifications/
+```
+
+## 📚 Key Learning Points
+
+### 1. **Service Separation**
+- Each service has its own database
+- Services communicate via events
+- Clear boundaries and responsibilities
+
+### 2. **Event-Driven Architecture**
+- Services publish events for state changes
+- Other services react to events
+- Loose coupling between services
+
+### 3. **Caching Strategy**
+- Redis for frequently accessed data
+- Cache invalidation on data changes
+- Improved performance
+
+### 4. **Database Design**
+- Database per service pattern
+- Shared models for consistency
+- Proper indexing and constraints
+
+## 🔄 Next Steps
+
+1. **Add Authentication/Authorization**
+2. **Implement API Gateway**
+3. **Add Monitoring and Logging**
+4. **Set up CI/CD Pipeline**
+5. **Add Unit and Integration Tests**
+6. **Implement Circuit Breakers**
+7. **Add Rate Limiting**
+
+## 📖 Additional Resources
+
+- [Microservices.io](https://microservices.io/)
+- [Martin Fowler's Blog](https://martinfowler.com/articles/microservices.html)
 - [Go Documentation](https://golang.org/doc/)
-- [Docker Documentation](https://docs.docker.com/)
 - [Kafka Documentation](https://kafka.apache.org/documentation/)
 - [Redis Documentation](https://redis.io/documentation)
 
-### Books
-- "Building Microservices" by Sam Newman
-- "Designing Data-Intensive Applications" by Martin Kleppmann
-- "Go Programming Language" by Alan Donovan and Brian Kernighan
-
-## 🎉 Congratulations!
-
-You've successfully:
-- ✅ Set up a complete microservices architecture
-- ✅ Implemented Redis caching
-- ✅ Configured Kafka event-driven communication
-- ✅ Created a working system with two services
-- ✅ Tested the functionality
-- ✅ Understood the key concepts
-
-You're now ready to build your own microservices applications!
+This transformation demonstrates the core principles of microservices architecture while maintaining the functionality of your original monolithic application.

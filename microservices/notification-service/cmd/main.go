@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -12,32 +11,31 @@ import (
 
 	"notification-service/internal/handlers"
 	"notification-service/internal/kafka"
+	"notification-service/internal/models"
 	"notification-service/internal/repository"
 	"notification-service/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
-	"github.com/swaggo/files"
-	"github.com/swaggo/gin-swagger"
-	"github.com/swaggo/swag/example/basic/docs"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // @title Notification Service API
 // @version 1.0
-// @description Notification management microservice with Kafka event processing
+// @description This is the Notification Service API for the microservices architecture.
 // @termsOfService http://swagger.io/terms/
 
 // @contact.name API Support
-// @contact.url http://www.swagger.io/support
-// @contact.email support@swagger.io
+// @contact.email support@example.com
 
-// @license.name MIT
-// @license.url https://opensource.org/licenses/MIT
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 
 // @host localhost:8082
 // @BasePath /api/v1
-
 func main() {
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
@@ -49,29 +47,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
 
-	// Initialize repositories
+	// Initialize repository
 	notificationRepo := repository.NewNotificationRepository(db)
 
-	// Initialize services
+	// Initialize service
 	notificationService := service.NewNotificationService(notificationRepo)
 
 	// Initialize Kafka consumer
 	kafkaBrokers := []string{getEnv("KAFKA_BROKERS", "localhost:9092")}
-	consumer := kafka.NewConsumer(
-		kafkaBrokers,
-		getEnv("KAFKA_TOPIC_USER_EVENTS", "user-events"),
-		getEnv("KAFKA_GROUP_ID", "notification-service"),
-		notificationService,
-	)
-	defer consumer.Close()
+	kafkaTopic := getEnv("KAFKA_TOPIC_USER_EVENTS", "user-events")
+	kafkaGroupID := getEnv("KAFKA_GROUP_ID", "notification-service")
 
-	// Start Kafka consumer in background
+	consumer := kafka.NewConsumer(kafkaBrokers, kafkaTopic, kafkaGroupID, notificationService)
+
+	// Start Kafka consumer in a goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
+		log.Printf("Starting Kafka consumer for topic: %s", kafkaTopic)
 		consumer.Start(ctx)
 	}()
 
@@ -79,10 +74,10 @@ func main() {
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 
 	// Setup Gin router
-	r := gin.Default()
+	router := gin.Default()
 
 	// Add CORS middleware
-	r.Use(func(c *gin.Context) {
+	router.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
@@ -96,54 +91,43 @@ func main() {
 	})
 
 	// API routes
-	api := r.Group("/api/v1")
+	api := router.Group("/api/v1")
 	{
 		// Notification routes
 		notifications := api.Group("/notifications")
 		{
-			notifications.POST("", notificationHandler.CreateNotification)
-			notifications.GET("", notificationHandler.GetAllNotifications)
+			notifications.POST("/", notificationHandler.CreateNotification)
+			notifications.GET("/", notificationHandler.GetAllNotifications)
+			notifications.GET("/user/:userId", notificationHandler.GetNotificationsByUserID)
 			notifications.GET("/:id", notificationHandler.GetNotificationByID)
-			notifications.GET("/user/:user_id", notificationHandler.GetNotificationsByUserID)
+			notifications.POST("/retry", notificationHandler.RetryFailedNotifications)
 		}
 
 		// Health check
-		api.GET("/health", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"status":    "healthy",
-				"service":   "notification-service",
-				"timestamp": time.Now().Unix(),
-			})
-		})
+		api.GET("/health", notificationHandler.HealthCheck)
 	}
 
 	// Swagger documentation
-	docs.SwaggerInfo.Title = "Notification Service API"
-	docs.SwaggerInfo.Description = "Notification management microservice with Kafka event processing"
-	docs.SwaggerInfo.Version = "1.0"
-	docs.SwaggerInfo.Host = getEnv("HOST", "localhost:8082")
-	docs.SwaggerInfo.BasePath = "/api/v1"
-	docs.SwaggerInfo.Schemes = []string{"http", "https"}
-
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Start server
 	port := getEnv("PORT", "8082")
-	log.Printf("Notification service starting on port %s", port)
+	serverAddr := fmt.Sprintf(":%s", port)
 
 	// Graceful shutdown
 	go func() {
-		if err := r.Run(":" + port); err != nil {
+		log.Printf("Notification Service starting on port %s", port)
+		if err := router.Run(serverAddr); err != nil {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down notification service...")
+	log.Println("Shutting down Notification Service...")
 
 	// Cancel context to stop Kafka consumer
 	cancel()
@@ -152,52 +136,44 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	// Close connections gracefully
-	if err := db.Close(); err != nil {
-		log.Printf("Error closing database: %v", err)
-	}
-
+	// Close Kafka consumer
 	if err := consumer.Close(); err != nil {
 		log.Printf("Error closing Kafka consumer: %v", err)
 	}
 
-	log.Println("Notification service stopped")
+	log.Println("Notification Service stopped")
 }
 
 // initDatabase initializes the database connection
-func initDatabase() (*sql.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+func initDatabase() (*gorm.DB, error) {
+	dsn := fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
 		getEnv("DB_HOST", "localhost"),
-		getEnv("DB_PORT", "5432"),
 		getEnv("DB_USER", "postgres"),
-		getEnv("DB_PASSWORD", "password"),
+		getEnv("DB_PASSWORD", "12345"),
 		getEnv("DB_NAME", "notification_service"),
+		getEnv("DB_PORT", "5432"),
 		getEnv("DB_SSLMODE", "disable"),
 	)
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Test the connection
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	// Auto migrate the schema
+	if err := db.AutoMigrate(&models.Notification{}); err != nil {
+		return nil, fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
-	// Set connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	log.Println("Database connected successfully")
+	log.Println("Database initialized successfully")
 	return db, nil
 }
 
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
+// getEnv gets an environment variable with a fallback value
+func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
-	return defaultValue
+	return fallback
 }

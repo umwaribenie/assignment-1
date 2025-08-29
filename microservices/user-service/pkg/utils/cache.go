@@ -27,7 +27,7 @@ func NewCacheClient(addr, password string, db int) *CacheClient {
 	}
 }
 
-// Set stores a key-value pair in cache with expiration
+// Set stores a key-value pair in Redis with optional expiration
 func (c *CacheClient) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	jsonValue, err := json.Marshal(value)
 	if err != nil {
@@ -37,20 +37,20 @@ func (c *CacheClient) Set(ctx context.Context, key string, value interface{}, ex
 	return c.client.Set(ctx, key, jsonValue, expiration).Err()
 }
 
-// Get retrieves a value from cache by key
+// Get retrieves a value from Redis by key
 func (c *CacheClient) Get(ctx context.Context, key string, dest interface{}) error {
 	val, err := c.client.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("key not found: %s", key)
 		}
-		return fmt.Errorf("failed to get key: %w", err)
+		return fmt.Errorf("failed to get value: %w", err)
 	}
 
 	return json.Unmarshal([]byte(val), dest)
 }
 
-// Delete removes a key from cache
+// Delete removes a key from Redis
 func (c *CacheClient) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
@@ -69,7 +69,7 @@ func (c *CacheClient) DeletePattern(ctx context.Context, pattern string) error {
 	return nil
 }
 
-// Exists checks if a key exists in cache
+// Exists checks if a key exists in Redis
 func (c *CacheClient) Exists(ctx context.Context, key string) (bool, error) {
 	result, err := c.client.Exists(ctx, key).Result()
 	if err != nil {
@@ -79,7 +79,7 @@ func (c *CacheClient) Exists(ctx context.Context, key string) (bool, error) {
 	return result > 0, nil
 }
 
-// SetNX sets a key only if it doesn't already exist
+// SetNX sets a key-value pair only if the key doesn't exist
 func (c *CacheClient) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
 	jsonValue, err := json.Marshal(value)
 	if err != nil {
@@ -89,24 +89,27 @@ func (c *CacheClient) SetNX(ctx context.Context, key string, value interface{}, 
 	return c.client.SetNX(ctx, key, jsonValue, expiration).Result()
 }
 
-// Close closes the Redis connection
-func (c *CacheClient) Close() error {
-	return c.client.Close()
-}
-
-// Cache keys for user service
-const (
-	UserCacheKeyPrefix = "user:"
-	UserListCacheKey   = "users:list"
-	UserCountCacheKey  = "users:count"
-)
-
 // GenerateUserCacheKey generates a cache key for a specific user
 func GenerateUserCacheKey(userID string) string {
-	return fmt.Sprintf("%s%s", UserCacheKeyPrefix, userID)
+	return fmt.Sprintf("user:%s", userID)
 }
 
-// GenerateUserListCacheKey generates a cache key for user list with filters
+// GenerateUserListCacheKey generates a cache key for user list queries
 func GenerateUserListCacheKey(filter string) string {
-	return fmt.Sprintf("%s:%s", UserListCacheKey, filter)
+	return fmt.Sprintf("users:list:%s", filter)
+}
+
+// GenerateUserByEmailCacheKey generates a cache key for user by email
+func GenerateUserByEmailCacheKey(email string) string {
+	return fmt.Sprintf("user:email:%s", email)
+}
+
+// GenerateUserByUsernameCacheKey generates a cache key for user by username
+func GenerateUserByUsernameCacheKey(username string) string {
+	return fmt.Sprintf("user:username:%s", username)
+}
+
+// GenerateUserBySlugCacheKey generates a cache key for user by slug
+func GenerateUserBySlugCacheKey(slug string) string {
+	return fmt.Sprintf("user:slug:%s", slug)
 }

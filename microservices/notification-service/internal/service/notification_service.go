@@ -4,230 +4,288 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
+	"os"
+	"strconv"
 	"time"
 
 	"notification-service/internal/models"
 	"notification-service/internal/repository"
+
+	"gopkg.in/gomail.v2"
 )
 
-// NotificationService represents the notification service
-type NotificationService struct {
-	notificationRepo *repository.NotificationRepository
+// NotificationService interface defines the business logic methods
+type NotificationService interface {
+	CreateNotification(ctx context.Context, req models.CreateNotificationRequest) (*models.NotificationResponse, error)
+	GetNotificationByID(ctx context.Context, id string) (*models.NotificationResponse, error)
+	GetAllNotifications(ctx context.Context, filter models.NotificationFilter) (*models.PaginatedResponse, error)
+	GetNotificationsByUserID(ctx context.Context, userID string, filter models.NotificationFilter) (*models.PaginatedResponse, error)
+	ProcessNotification(ctx context.Context, notification *models.Notification) error
+	RetryFailedNotifications(ctx context.Context) error
+}
+
+// notificationService implements NotificationService
+type notificationService struct {
+	notificationRepo repository.NotificationRepository
 }
 
 // NewNotificationService creates a new notification service
-func NewNotificationService(notificationRepo *repository.NotificationRepository) *NotificationService {
-	return &NotificationService{
+func NewNotificationService(notificationRepo repository.NotificationRepository) NotificationService {
+	return &notificationService{
 		notificationRepo: notificationRepo,
 	}
 }
 
 // CreateNotification creates a new notification
-func (s *NotificationService) CreateNotification(ctx context.Context, req models.CreateNotificationRequest) error {
-	// Set default max retries if not provided
-	if req.MaxRetries == 0 {
-		req.MaxRetries = 3
-	}
-
+func (s *notificationService) CreateNotification(ctx context.Context, req models.CreateNotificationRequest) (*models.NotificationResponse, error) {
+	// Create notification
 	notification := &models.Notification{
 		UserID:    req.UserID,
 		Type:      req.Type,
 		Subject:   req.Subject,
 		Message:   req.Message,
+		Recipient: req.Recipient,
 		Template:  req.Template,
-		Variables: req.Variables,
-		MaxRetries: req.MaxRetries,
+		Variables: models.JSONB(req.Variables),
+		Status:    models.NotificationStatusPending,
+		RetryCount: 0,
+		MaxRetries: 3,
 	}
 
 	if err := s.notificationRepo.Create(ctx, notification); err != nil {
-		return fmt.Errorf("failed to create notification: %w", err)
+		return nil, fmt.Errorf("failed to create notification: %w", err)
 	}
 
-	log.Printf("Created notification: %s for user: %s", notification.ID, notification.UserID)
+	// Process the notification asynchronously
+	go func() {
+		if err := s.ProcessNotification(context.Background(), notification); err != nil {
+			log.Printf("Failed to process notification %s: %v", notification.ID, err)
+		}
+	}()
 
-	// In a real implementation, you would trigger the notification processing
-	// This could be done via a background worker or message queue
-	go s.processNotification(context.Background(), notification.ID)
-
-	return nil
+	return s.toNotificationResponse(notification), nil
 }
 
 // GetNotificationByID retrieves a notification by ID
-func (s *NotificationService) GetNotificationByID(ctx context.Context, id string) (*models.NotificationResponse, error) {
-	notificationID, err := parseUUID(id)
+func (s *notificationService) GetNotificationByID(ctx context.Context, id string) (*models.NotificationResponse, error) {
+	notification, err := s.notificationRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("invalid notification ID: %w", err)
-	}
-
-	notification, err := s.notificationRepo.GetByID(ctx, notificationID)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get notification: %w", err)
 	}
 
 	return s.toNotificationResponse(notification), nil
 }
 
-// GetAllNotifications retrieves all notifications with filtering and pagination
-func (s *NotificationService) GetAllNotifications(ctx context.Context, filter models.NotificationFilter) (*models.PaginatedResponse, error) {
-	response, err := s.notificationRepo.GetAll(ctx, filter)
+// GetAllNotifications retrieves all notifications with pagination and filtering
+func (s *notificationService) GetAllNotifications(ctx context.Context, filter models.NotificationFilter) (*models.PaginatedResponse, error) {
+	notifications, total, err := s.notificationRepo.GetAll(ctx, filter)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get notifications: %w", err)
 	}
 
-	// Convert notifications to responses
-	if notifications, ok := response.Data.([]models.Notification); ok {
-		var notificationResponses []models.NotificationResponse
-		for _, notification := range notifications {
-			notificationResponses = append(notificationResponses, *s.toNotificationResponse(&notification))
-		}
-		response.Data = notificationResponses
+	// Convert to response format
+	notificationResponses := make([]models.NotificationResponse, len(notifications))
+	for i, notification := range notifications {
+		notificationResponses[i] = *s.toNotificationResponse(&notification)
 	}
 
-	return response, nil
+	// Calculate pagination
+	lastPage := int(math.Ceil(float64(total) / float64(filter.PageSize)))
+	if lastPage == 0 && total > 0 {
+		lastPage = 1
+	}
+
+	var nextPage, previousPage *int
+	if filter.PageNumber < lastPage {
+		next := filter.PageNumber + 1
+		nextPage = &next
+	}
+	if filter.PageNumber > 1 {
+		prev := filter.PageNumber - 1
+		previousPage = &prev
+	}
+
+	return &models.PaginatedResponse{
+		CurrentPage:  filter.PageNumber,
+		LastPage:     lastPage,
+		List:         notificationResponses,
+		NextPage:     nextPage,
+		PreviousPage: previousPage,
+		Status:       "success",
+		Total:        total,
+	}, nil
 }
 
-// processNotification processes a notification (sends it)
-func (s *NotificationService) processNotification(ctx context.Context, notificationID string) {
-	// Parse UUID
-	id, err := parseUUID(notificationID)
+// GetNotificationsByUserID retrieves notifications for a specific user
+func (s *notificationService) GetNotificationsByUserID(ctx context.Context, userID string, filter models.NotificationFilter) (*models.PaginatedResponse, error) {
+	notifications, total, err := s.notificationRepo.GetByUserID(ctx, userID, filter)
 	if err != nil {
-		log.Printf("Invalid notification ID: %v", err)
-		return
+		return nil, fmt.Errorf("failed to get user notifications: %w", err)
 	}
 
-	// Get notification
-	notification, err := s.notificationRepo.GetByID(ctx, id)
-	if err != nil {
-		log.Printf("Failed to get notification: %v", err)
-		return
+	// Convert to response format
+	notificationResponses := make([]models.NotificationResponse, len(notifications))
+	for i, notification := range notifications {
+		notificationResponses[i] = *s.toNotificationResponse(&notification)
 	}
 
-	// Check if already processed
-	if notification.Status != models.NotificationStatusPending {
-		return
+	// Calculate pagination
+	lastPage := int(math.Ceil(float64(total) / float64(filter.PageSize)))
+	if lastPage == 0 && total > 0 {
+		lastPage = 1
 	}
 
-	// Send notification based on type
-	var err2 error
+	var nextPage, previousPage *int
+	if filter.PageNumber < lastPage {
+		next := filter.PageNumber + 1
+		nextPage = &next
+	}
+	if filter.PageNumber > 1 {
+		prev := filter.PageNumber - 1
+		previousPage = &prev
+	}
+
+	return &models.PaginatedResponse{
+		CurrentPage:  filter.PageNumber,
+		LastPage:     lastPage,
+		List:         notificationResponses,
+		NextPage:     nextPage,
+		PreviousPage: previousPage,
+		Status:       "success",
+		Total:        total,
+	}, nil
+}
+
+// ProcessNotification processes a notification by sending it via the appropriate channel
+func (s *notificationService) ProcessNotification(ctx context.Context, notification *models.Notification) error {
+	var err error
+
 	switch notification.Type {
 	case models.NotificationTypeEmail:
-		err2 = s.sendEmailNotification(ctx, notification)
+		err = s.sendEmailNotification(notification)
 	case models.NotificationTypeSMS:
-		err2 = s.sendSMSNotification(ctx, notification)
+		err = s.sendSMSNotification(notification)
 	case models.NotificationTypePush:
-		err2 = s.sendPushNotification(ctx, notification)
+		err = s.sendPushNotification(notification)
 	default:
-		err2 = fmt.Errorf("unknown notification type: %s", notification.Type)
+		err = fmt.Errorf("unsupported notification type: %s", notification.Type)
 	}
 
 	// Update notification status
-	updates := make(map[string]interface{})
-	if err2 != nil {
-		// Increment retry count
+	if err != nil {
+		notification.Status = models.NotificationStatusFailed
 		notification.RetryCount++
-		updates["retry_count"] = notification.RetryCount
-
-		// Check if max retries reached
-		if notification.RetryCount >= notification.MaxRetries {
-			updates["status"] = models.NotificationStatusFailed
-			updates["error"] = err2.Error()
-			log.Printf("Notification failed after %d retries: %v", notification.RetryCount, err2)
-		} else {
-			// Schedule retry
-			log.Printf("Notification failed, will retry (%d/%d): %v", notification.RetryCount, notification.MaxRetries, err2)
-			// In a real implementation, you would schedule a retry
-		}
+		notification.FailedAt = &time.Time{}
+		notification.ErrorMsg = err.Error()
 	} else {
-		// Success
-		now := time.Now()
-		updates["status"] = models.NotificationStatusSent
-		updates["sent_at"] = &now
-		log.Printf("Notification sent successfully: %s", notification.ID)
+		notification.Status = models.NotificationStatusSent
+		notification.SentAt = &time.Time{}
 	}
 
-	if err := s.notificationRepo.Update(ctx, notification.ID, updates); err != nil {
-		log.Printf("Failed to update notification status: %v", err)
+	// Update the notification in the database
+	if updateErr := s.notificationRepo.Update(ctx, notification.ID, notification); updateErr != nil {
+		log.Printf("Failed to update notification status: %v", updateErr)
 	}
+
+	return err
+}
+
+// RetryFailedNotifications retries failed notifications
+func (s *notificationService) RetryFailedNotifications(ctx context.Context) error {
+	notifications, err := s.notificationRepo.GetPendingNotifications(ctx, 100)
+	if err != nil {
+		return fmt.Errorf("failed to get pending notifications: %w", err)
+	}
+
+	for _, notification := range notifications {
+		if err := s.ProcessNotification(ctx, &notification); err != nil {
+			log.Printf("Failed to retry notification %s: %v", notification.ID, err)
+		}
+	}
+
+	return nil
 }
 
 // sendEmailNotification sends an email notification
-func (s *NotificationService) sendEmailNotification(ctx context.Context, notification *models.Notification) error {
-	// In a real implementation, you would integrate with an email service
-	// like SendGrid, AWS SES, or SMTP server
-	
-	log.Printf("Sending email notification to user %s: %s", notification.UserID, notification.Subject)
-	
-	// Simulate email sending
-	time.Sleep(100 * time.Millisecond)
-	
-	// Simulate occasional failure for testing
-	if time.Now().UnixNano()%10 == 0 {
-		return fmt.Errorf("simulated email sending failure")
+func (s *notificationService) sendEmailNotification(notification *models.Notification) error {
+	// Get SMTP configuration from environment
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPortStr := os.Getenv("SMTP_PORT")
+	smtpUsername := os.Getenv("SMTP_USERNAME")
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	fromEmail := os.Getenv("FROM_EMAIL")
+
+	if smtpHost == "" || smtpPortStr == "" || smtpUsername == "" || smtpPassword == "" {
+		return fmt.Errorf("SMTP configuration is incomplete")
 	}
-	
+
+	smtpPort, err := strconv.Atoi(smtpPortStr)
+	if err != nil {
+		return fmt.Errorf("invalid SMTP port: %w", err)
+	}
+
+	// Create email message
+	m := gomail.NewMessage()
+	m.SetHeader("From", fromEmail)
+	m.SetHeader("To", notification.Recipient)
+	m.SetHeader("Subject", notification.Subject)
+	m.SetBody("text/html", notification.Message)
+
+	// Create dialer
+	d := gomail.NewDialer(smtpHost, smtpPort, smtpUsername, smtpPassword)
+
+	// Send email
+	if err := d.DialAndSend(m); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	log.Printf("Email sent successfully to %s", notification.Recipient)
 	return nil
 }
 
 // sendSMSNotification sends an SMS notification
-func (s *NotificationService) sendSMSNotification(ctx context.Context, notification *models.Notification) error {
-	// In a real implementation, you would integrate with an SMS service
-	// like Twilio, AWS SNS, or other SMS providers
-	
-	log.Printf("Sending SMS notification to user %s: %s", notification.UserID, notification.Message)
+func (s *notificationService) sendSMSNotification(notification *models.Notification) error {
+	// For now, we'll just log the SMS
+	// In a real implementation, you would integrate with an SMS provider like Twilio
+	log.Printf("SMS would be sent to %s: %s", notification.Recipient, notification.Message)
 	
 	// Simulate SMS sending
-	time.Sleep(50 * time.Millisecond)
-	
-	// Simulate occasional failure for testing
-	if time.Now().UnixNano()%15 == 0 {
-		return fmt.Errorf("simulated SMS sending failure")
-	}
+	time.Sleep(100 * time.Millisecond)
 	
 	return nil
 }
 
 // sendPushNotification sends a push notification
-func (s *NotificationService) sendPushNotification(ctx context.Context, notification *models.Notification) error {
-	// In a real implementation, you would integrate with push notification services
-	// like Firebase Cloud Messaging, Apple Push Notification Service, etc.
-	
-	log.Printf("Sending push notification to user %s: %s", notification.UserID, notification.Subject)
+func (s *notificationService) sendPushNotification(notification *models.Notification) error {
+	// For now, we'll just log the push notification
+	// In a real implementation, you would integrate with FCM, APNS, etc.
+	log.Printf("Push notification would be sent to %s: %s", notification.Recipient, notification.Message)
 	
 	// Simulate push notification sending
-	time.Sleep(30 * time.Millisecond)
-	
-	// Simulate occasional failure for testing
-	if time.Now().UnixNano()%20 == 0 {
-		return fmt.Errorf("simulated push notification failure")
-	}
+	time.Sleep(100 * time.Millisecond)
 	
 	return nil
 }
 
-// toNotificationResponse converts a Notification to NotificationResponse
-func (s *NotificationService) toNotificationResponse(notification *models.Notification) *models.NotificationResponse {
+// toNotificationResponse converts a Notification model to NotificationResponse
+func (s *notificationService) toNotificationResponse(notification *models.Notification) *models.NotificationResponse {
 	return &models.NotificationResponse{
 		ID:          notification.ID,
 		UserID:      notification.UserID,
 		Type:        notification.Type,
 		Subject:     notification.Subject,
 		Message:     notification.Message,
-		Template:    notification.Template,
-		Variables:   notification.Variables,
+		Recipient:   notification.Recipient,
 		Status:      notification.Status,
+		Template:    notification.Template,
+		Variables:   map[string]interface{}(notification.Variables),
 		RetryCount:  notification.RetryCount,
 		MaxRetries:  notification.MaxRetries,
 		SentAt:      notification.SentAt,
-		DeliveredAt: notification.DeliveredAt,
-		Error:       notification.Error,
+		FailedAt:    notification.FailedAt,
+		ErrorMsg:    notification.ErrorMsg,
 		CreatedAt:   notification.CreatedAt,
 		UpdatedAt:   notification.UpdatedAt,
 	}
-}
-
-// Helper function to parse UUID
-func parseUUID(id string) (string, error) {
-	// In a real implementation, you would use github.com/google/uuid
-	// For now, we'll just return the string as is
-	return id, nil
 }
