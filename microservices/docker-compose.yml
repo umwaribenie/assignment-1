@@ -1,0 +1,200 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: microservices_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: user_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: microservices_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Zookeeper (required for Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: microservices_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: microservices_kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # User Service
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: microservices_user_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      - PORT=8081
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=12345
+      - DB_NAME=user_service
+      - DB_SSLMODE=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - KAFKA_BROKERS=kafka:29092
+      - JWT_SECRET_KEY=JYw9w!65uGkHYzN7p@3VBqcFzS9u3cMhFzLHVfZz2XXrHyqR*W4PQvbJL!rNf9@
+      - JWT_EXPIRY=24h
+      - LOG_LEVEL=info
+    ports:
+      - "8081:8081"
+    networks:
+      - microservices_network
+    restart: unless-stopped
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: microservices_notification_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      - PORT=8082
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=12345
+      - DB_NAME=notification_service
+      - DB_SSLMODE=disable
+      - KAFKA_BROKERS=kafka:29092
+      - KAFKA_TOPIC_USER_EVENTS=user-events
+      - KAFKA_GROUP_ID=notification-service
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USERNAME=umwaribenie5@gmail.com
+      - SMTP_PASSWORD=tfpsynqwugztvxbu
+      - FROM_EMAIL=umwaribenie5@gmail.com
+      - TWILIO_ACCOUNT_SID=your_twilio_account_sid
+      - TWILIO_AUTH_TOKEN=your_twilio_auth_token
+      - TWILIO_PHONE_NUMBER=your_twilio_phone_number
+      - LOG_LEVEL=info
+    ports:
+      - "8082:8082"
+    networks:
+      - microservices_network
+    restart: unless-stopped
+
+  # Kafka UI (Optional - for monitoring Kafka)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: microservices_kafka_ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - microservices_network
+    restart: unless-stopped
+
+  # Redis Commander (Optional - for monitoring Redis)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: microservices_redis_commander
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8083:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    networks:
+      - microservices_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+
+networks:
+  microservices_network:
+    driver: bridge
